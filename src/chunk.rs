@@ -1,35 +1,35 @@
+type Value = f64;
+
 #[derive(Debug, PartialEq)]
 pub enum OpCode {
+    OpConstant(usize),
     OpReturn,
-}
-
-impl std::fmt::Display for OpCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OpCode::OpReturn => write!(f, "OpReturn"),
-        }
-    }
-}
-
-impl OpCode {
-    #[cfg(debug_assertions)]
-    fn print_instruction(&self) {
-        println!("{}", self);
-    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Chunk {
     code: Vec<OpCode>,
+    constants: Vec<Value>,
+    lines: Vec<usize>,
 }
 
 impl Chunk {
     pub fn new() -> Self {
-        Chunk { code: Vec::new() }
+        Chunk {
+            code: Vec::new(),
+            constants: Vec::new(),
+            lines: Vec::new(),
+        }
     }
 
-    pub fn write_byte(&mut self, byte: OpCode) {
-        self.code.push(byte)
+    pub fn write_chunk(&mut self, byte: OpCode, line: usize) {
+        self.code.push(byte);
+        self.lines.push(line);
+    }
+
+    pub fn add_constant(&mut self, constant: Value) -> usize {
+        self.constants.push(constant);
+        self.constants.len() - 1
     }
 
     #[cfg(debug_assertions)]
@@ -37,7 +37,27 @@ impl Chunk {
         println!("== {} ==", name);
         for (i, code) in self.code.iter().enumerate() {
             print!("{:04} ", i);
-            code.print_instruction();
+            if i > 0 && self.lines[i] == self.lines[i - 1] {
+                print!("{:>4} ", "|");
+            } else {
+                print!("{:04} ", self.lines[i]);
+            }
+            self.print_code(code);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn print_code(&self, code: &OpCode) {
+        match code {
+            OpCode::OpConstant(const_index) => {
+                let constant = self.constants.get(*const_index);
+                if let Some(value) = constant {
+                    println!("{:<16} {:04} {}", "OpConstant", const_index, value);
+                } else {
+                    println!("{:<16} {:04} !!No Value!!", "OpConstant", const_index);
+                }
+            }
+            OpCode::OpReturn => println!("OpReturn"),
         }
     }
 }
@@ -50,10 +70,25 @@ mod tests {
     #[test]
     fn test_write_byte() {
         let mut chunk = Chunk::new();
-        chunk.write_byte(OpCode::OpReturn);
+        chunk.write_chunk(OpCode::OpReturn, 0);
         let expected = Chunk {
             code: vec![OpCode::OpReturn],
+            constants: vec![],
+            lines: vec![0],
         };
         assert_eq!(expected, chunk)
+    }
+
+    #[test]
+    fn test_add_constant() {
+        let mut chunk = Chunk::new();
+        let index = chunk.add_constant(45.0);
+        let expected = Chunk {
+            code: vec![],
+            constants: vec![45.0],
+            lines: vec![],
+        };
+        assert_eq!(expected, chunk);
+        assert_eq!(0, index);
     }
 }
