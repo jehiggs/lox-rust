@@ -1,10 +1,15 @@
-type Value = f64;
+pub type Value = f64;
 
 #[derive(Debug, PartialEq)]
 pub enum OpCode {
+    Add,
     Constant(u8),
     ConstantLong(usize),
+    Divide,
+    Multiply,
+    Negate,
     Return,
+    Subtract,
 }
 
 #[derive(Debug, PartialEq)]
@@ -23,8 +28,8 @@ impl Chunk {
         }
     }
 
-    pub fn write_chunk(&mut self, byte: OpCode, line: usize) {
-        self.code.push(byte);
+    pub fn write_chunk(&mut self, code: OpCode, line: usize) {
+        self.code.push(code);
         let last = self.lines.last_mut();
         if let Some((count, last_line)) = last
             && *last_line == line
@@ -48,19 +53,32 @@ impl Chunk {
         self.constants.len() - 1
     }
 
+    pub fn read_code(&self, index: usize) -> &OpCode {
+        self.code.get(index).unwrap_or(&OpCode::Return)
+    }
+
+    pub fn read_constant(&self, index: usize) -> Value {
+        self.constants[index]
+    }
+
     #[cfg(debug_assertions)]
     pub fn disassemble_chunk(&self, name: &str) {
         println!("== {} ==", name);
         for (i, code) in self.code.iter().enumerate() {
-            print!("{:04} ", i);
-            let line = self.get_line(i);
-            if i > 0 && line == self.get_line(i - 1) {
-                print!("{:>4} ", "|");
-            } else {
-                print!("{:04} ", line);
-            }
-            self.print_code(code);
+            self.disassemble_instruction(i, code);
         }
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn disassemble_instruction(&self, index: usize, code: &OpCode) {
+        print!("{:04} ", index);
+        let line = self.get_line(index);
+        if index > 0 && line == self.get_line(index - 1) {
+            print!("{:>4} ", "|");
+        } else {
+            print!("{:>4} ", line);
+        }
+        self.print_code(code);
     }
 
     #[cfg(debug_assertions)]
@@ -82,20 +100,25 @@ impl Chunk {
             OpCode::Constant(const_index) => {
                 let constant = self.constants.get(usize::from(*const_index));
                 if let Some(value) = constant {
-                    println!("{:<16} {:04} {}", "OpConstant", const_index, value);
+                    println!("{:<16} {:04} {}", "Constant", const_index, value);
                 } else {
-                    println!("{:<16} {:04} !!No Value!!", "OpConstant", const_index);
+                    println!("{:<16} {:04} !!No Value!!", "Constant", const_index);
                 }
             }
             OpCode::ConstantLong(const_index) => {
                 let constant = self.constants.get(*const_index);
                 if let Some(value) = constant {
-                    println!("{:<16} {:04} {}", "OpConstant", const_index, value);
+                    println!("{:<16} {:04} {}", "ConstantLong", const_index, value);
                 } else {
-                    println!("{:<16} {:04} !!No Value!!", "OpConstant", const_index);
+                    println!("{:<16} {:04} !!No Value!!", "ConstantLong", const_index);
                 }
             }
-            OpCode::Return => println!("OpReturn"),
+            OpCode::Return => println!("Return"),
+            OpCode::Negate => println!("Negate"),
+            OpCode::Add => println!("Add"),
+            OpCode::Divide => println!("Divide"),
+            OpCode::Multiply => println!("Multiply"),
+            OpCode::Subtract => println!("Subtract"),
         }
     }
 }
