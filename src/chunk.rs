@@ -2,8 +2,9 @@ type Value = f64;
 
 #[derive(Debug, PartialEq)]
 pub enum OpCode {
-    OpConstant(usize),
-    OpReturn,
+    Constant(u8),
+    ConstantLong(usize),
+    Return,
 }
 
 #[derive(Debug, PartialEq)]
@@ -32,6 +33,14 @@ impl Chunk {
         } else {
             self.lines.push((1, line));
         }
+    }
+
+    pub fn write_constant(&mut self, constant: Value, line: usize) {
+        self.constants.push(constant);
+        let index = self.constants.len() - 1;
+        let byte =
+            u8::try_from(index).map_or_else(|_| OpCode::ConstantLong(index), OpCode::Constant);
+        self.write_chunk(byte, line);
     }
 
     pub fn add_constant(&mut self, constant: Value) -> usize {
@@ -70,7 +79,15 @@ impl Chunk {
     #[cfg(debug_assertions)]
     fn print_code(&self, code: &OpCode) {
         match code {
-            OpCode::OpConstant(const_index) => {
+            OpCode::Constant(const_index) => {
+                let constant = self.constants.get(usize::from(*const_index));
+                if let Some(value) = constant {
+                    println!("{:<16} {:04} {}", "OpConstant", const_index, value);
+                } else {
+                    println!("{:<16} {:04} !!No Value!!", "OpConstant", const_index);
+                }
+            }
+            OpCode::ConstantLong(const_index) => {
                 let constant = self.constants.get(*const_index);
                 if let Some(value) = constant {
                     println!("{:<16} {:04} {}", "OpConstant", const_index, value);
@@ -78,7 +95,7 @@ impl Chunk {
                     println!("{:<16} {:04} !!No Value!!", "OpConstant", const_index);
                 }
             }
-            OpCode::OpReturn => println!("OpReturn"),
+            OpCode::Return => println!("OpReturn"),
         }
     }
 }
@@ -89,11 +106,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_write_byte() {
+    fn write_byte() {
         let mut chunk = Chunk::new();
-        chunk.write_chunk(OpCode::OpReturn, 0);
+        chunk.write_chunk(OpCode::Return, 0);
         let expected = Chunk {
-            code: vec![OpCode::OpReturn],
+            code: vec![OpCode::Return],
             constants: vec![],
             lines: vec![(1, 0)],
         };
@@ -101,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_constant() {
+    fn add_constant() {
         let mut chunk = Chunk::new();
         let index = chunk.add_constant(45.0);
         let expected = Chunk {
@@ -111,5 +128,27 @@ mod tests {
         };
         assert_eq!(expected, chunk);
         assert_eq!(0, index);
+    }
+
+    #[test]
+    fn many_constants() {
+        let mut chunk = Chunk::new();
+        for i in 0..300 {
+            chunk.add_constant(i.into());
+        }
+        chunk.write_constant(123.into(), 0);
+        assert_eq!(OpCode::ConstantLong(300), *chunk.code.last().unwrap());
+    }
+
+    #[test]
+    fn write_single_constant() {
+        let mut chunk = Chunk::new();
+        chunk.write_constant(1.2, 0);
+        let expected = Chunk {
+            code: vec![OpCode::Constant(0)],
+            constants: vec![1.2],
+            lines: vec![(1, 0)],
+        };
+        assert_eq!(expected, chunk);
     }
 }
