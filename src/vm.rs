@@ -2,6 +2,7 @@ use crate::chunk;
 
 const STACK_SIZE: usize = 256;
 
+#[derive(Debug)]
 pub struct VM {
     chunk: chunk::Chunk,
     ip: usize,
