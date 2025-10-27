@@ -10,7 +10,7 @@ pub enum OpCode {
 pub struct Chunk {
     code: Vec<OpCode>,
     constants: Vec<Value>,
-    lines: Vec<usize>,
+    lines: Vec<(usize, usize)>,
 }
 
 impl Chunk {
@@ -24,7 +24,14 @@ impl Chunk {
 
     pub fn write_chunk(&mut self, byte: OpCode, line: usize) {
         self.code.push(byte);
-        self.lines.push(line);
+        let last = self.lines.last_mut();
+        if let Some((count, last_line)) = last
+            && *last_line == line
+        {
+            *count += 1;
+        } else {
+            self.lines.push((1, line));
+        }
     }
 
     pub fn add_constant(&mut self, constant: Value) -> usize {
@@ -37,13 +44,27 @@ impl Chunk {
         println!("== {} ==", name);
         for (i, code) in self.code.iter().enumerate() {
             print!("{:04} ", i);
-            if i > 0 && self.lines[i] == self.lines[i - 1] {
+            let line = self.get_line(i);
+            if i > 0 && line == self.get_line(i - 1) {
                 print!("{:>4} ", "|");
             } else {
-                print!("{:04} ", self.lines[i]);
+                print!("{:04} ", line);
             }
             self.print_code(code);
         }
+    }
+
+    #[cfg(debug_assertions)]
+    fn get_line(&self, index: usize) -> usize {
+        let mut current = index;
+        for (count, line) in &self.lines {
+            if current < *count {
+                return *line;
+            } else {
+                current -= count;
+            }
+        }
+        0
     }
 
     #[cfg(debug_assertions)]
@@ -74,7 +95,7 @@ mod tests {
         let expected = Chunk {
             code: vec![OpCode::OpReturn],
             constants: vec![],
-            lines: vec![0],
+            lines: vec![(1, 0)],
         };
         assert_eq!(expected, chunk)
     }
