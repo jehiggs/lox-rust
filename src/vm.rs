@@ -72,3 +72,33 @@ impl VM {
         self.chunk.disassemble_instruction(self.ip, instruction);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::chunk::Chunk;
+
+    use super::*;
+
+    #[test]
+    fn execute_binary_ops() {
+        let mut vm = VM::new(Chunk::new());
+        vm.stack.push(1.0);
+        vm.stack.push(2.0);
+        vm.binary_op(std::ops::Add::add);
+        assert_eq!(3.0, vm.stack.pop().unwrap());
+        vm.stack.push(4.0);
+        vm.stack.push(3.0);
+        vm.binary_op(std::ops::Sub::sub);
+        assert_eq!(1.0, vm.stack.pop().unwrap());
+
+        vm.stack.push(2.0);
+        vm.stack.push(3.0);
+        vm.binary_op(std::ops::Mul::mul);
+        assert_eq!(6.0, vm.stack.pop().unwrap());
+
+        vm.stack.push(6.0);
+        vm.stack.push(3.0);
+        vm.binary_op(std::ops::Div::div);
+        assert_eq!(2.0, vm.stack.pop().unwrap());
+    }
+}
