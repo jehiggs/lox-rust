@@ -1,4 +1,5 @@
 use crate::chunk;
+use crate::scanner;
 
 const STACK_SIZE: usize = 256;
 
@@ -9,8 +10,8 @@ pub struct VM {
     stack: Vec<chunk::Value>,
 }
 
-pub enum InterpretResult {
-    OK,
+#[derive(Debug)]
+pub enum Error {
     CompileError,
     RuntimeError,
 }
@@ -24,7 +25,14 @@ impl VM {
         }
     }
 
-    pub fn interpret(&mut self) -> InterpretResult {
+    pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
+        // Compile goes here.
+        let scanner = scanner::Scanner::new(source);
+
+        Ok(())
+    }
+
+    fn run(&mut self) -> Result<(), Error> {
         loop {
             let instruction = self.chunk.read_code(self.ip);
             #[cfg(debug_assertions)]
@@ -42,7 +50,7 @@ impl VM {
                 chunk::OpCode::Return => {
                     let value = self.stack.pop().unwrap_or(0.);
                     println!("Output is: {}", value);
-                    return InterpretResult::OK;
+                    return Ok(());
                 }
                 chunk::OpCode::Negate => {
                     if let Some(value) = self.stack.pop() {

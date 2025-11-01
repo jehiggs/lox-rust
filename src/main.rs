@@ -1,15 +1,38 @@
 mod chunk;
+mod scanner;
 mod vm;
 
-fn main() {
-    let mut chunk = chunk::Chunk::new();
-    chunk.write_constant(1.2, 0);
-    chunk.write_constant(3.4, 0);
-    chunk.write_chunk(chunk::OpCode::Add, 0);
-    chunk.write_constant(5.6, 0);
-    chunk.write_chunk(chunk::OpCode::Divide, 0);
-    chunk.write_chunk(chunk::OpCode::Negate, 0);
-    chunk.write_chunk(chunk::OpCode::Return, 0);
-    let mut vm = vm::VM::new(chunk);
-    vm.interpret();
+use std::env;
+use std::fs;
+use std::io;
+
+fn main() -> Result<(), String> {
+    let args: Vec<String> = env::args().collect();
+    let vm = vm::VM::new(chunk::Chunk::new());
+    if args.len() > 1 {
+        eprintln!("Too many arguments: {:?}", args);
+        eprintln!("Usage: rlox [file_path].");
+        Err("Too many arguments".into())
+    } else if let Some(file) = args.first() {
+        run_file(vm, file)
+    } else {
+        repl(vm)
+    }
+}
+
+fn repl(mut vm: vm::VM) -> Result<(), String> {
+    let mut line = String::new();
+
+    loop {
+        print!("> ");
+        io::stdin()
+            .read_line(&mut line)
+            .map_err(|err| err.to_string())?;
+        vm.interpret(&line); // TODO handle the result.
+    }
+}
+
+fn run_file(mut vm: vm::VM, file: &str) -> Result<(), String> {
+    let content = fs::read_to_string(file).map_err(|err| err.to_string())?;
+    vm.interpret(&content).map_err(|err| format!("{:?}", err))
 }
