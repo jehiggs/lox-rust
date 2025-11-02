@@ -1,5 +1,6 @@
 use crate::chunk;
 use crate::scanner;
+use std::fmt;
 
 const STACK_SIZE: usize = 256;
 
@@ -28,7 +29,16 @@ impl VM {
     pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
         // Compile goes here.
         let scanner = scanner::Scanner::new(source);
-
+        let mut current_line = 255;
+        for token in scanner {
+            if token.line != current_line {
+                current_line = token.line;
+                print!("{:>4}", current_line);
+            } else {
+                print!("{:>4}", "|");
+            }
+            println!(" {:?}", token.token_type);
+        }
         Ok(())
     }
 
@@ -78,6 +88,15 @@ impl VM {
     fn debug_instruction(&self, instruction: &chunk::OpCode) {
         println!("{:?}", self.stack);
         self.chunk.disassemble_instruction(self.ip, instruction);
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::CompileError => f.write_str("Compile Error."),
+            Error::RuntimeError => f.write_str("Runtime Error."),
+        }
     }
 }
 

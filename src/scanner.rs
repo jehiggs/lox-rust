@@ -11,11 +11,18 @@ impl<'a> Scanner<'a> {
     }
 
     fn parse(&mut self) -> Option<Token<'a>> {
-        if let Some(idx) = self.source.find(|c: char| !c.is_ascii_whitespace()) {
-            let whitespace = &self.source[0..idx];
-            self.source = &self.source[idx..];
-            self.line += whitespace.chars().filter(|&c| c == '\n').count();
+        let mut next_non_whitespace = 0;
+        for (idx, c) in self
+            .source
+            .char_indices()
+            .take_while(|&(_, c)| c.is_ascii_whitespace())
+        {
+            if c == '\n' {
+                self.line += 1;
+            }
+            next_non_whitespace = idx + 1;
         }
+        self.source = &self.source[next_non_whitespace..];
         let mut iter = self.source.chars().peekable();
         match iter.next() {
             Some('{') => self.parse_single_character(TokenType::LeftBrace),
@@ -378,5 +385,19 @@ mod tests {
             ],
             scanner.collect::<Vec<_>>()
         )
+    }
+
+    #[test]
+    fn empty_string_returns_none() {
+        let text = "";
+        let scanner = Scanner::new(text);
+        assert_eq!(Vec::<Token>::new(), scanner.collect::<Vec<Token>>())
+    }
+
+    #[test]
+    fn only_whitespace_returns_none() {
+        let text = "   \n";
+        let scanner = Scanner::new(text);
+        assert_eq!(Vec::<Token>::new(), scanner.collect::<Vec<Token>>())
     }
 }
