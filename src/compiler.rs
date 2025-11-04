@@ -1,0 +1,269 @@
+use crate::chunk;
+use crate::scanner;
+
+use std::iter;
+use std::mem;
+
+pub struct Compiler<'a> {
+    scanner: iter::Peekable<scanner::Scanner<'a>>,
+    chunk: chunk::Chunk,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    CompileError,
+}
+
+impl<'a> Compiler<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Compiler {
+            scanner: scanner::Scanner::new(source).peekable(),
+            chunk: chunk::Chunk::new(),
+        }
+    }
+
+    pub fn compile(mut self) -> Result<chunk::Chunk, Error> {
+        self.expression();
+        self.chunk.write_chunk(chunk::OpCode::Return, 0); // TODO fix the line?
+        Ok(self.chunk)
+    }
+
+    // Returns the current token to process!
+    fn advance(&mut self) -> Option<scanner::Token<'a>> {
+        for token in self.scanner.by_ref() {
+            match token.token_type {
+                scanner::TokenType::Error(message) => Self::report_error(&token, message),
+                _ => return Some(token),
+            }
+        }
+        None
+    }
+
+    fn peek(&mut self) -> Option<&scanner::Token<'a>> {
+        while let Some(token) = self.scanner.peek() {
+            match token.token_type {
+                scanner::TokenType::Error(message) => {
+                    Self::report_error(token, message);
+                    self.scanner.next();
+                }
+                _ => break,
+            }
+        }
+        self.scanner.peek()
+    }
+
+    fn consume(&mut self, token_type: mem::Discriminant<scanner::TokenType<'a>>, message: &str) {
+        if let Some(token) = self.peek() {
+            if mem::discriminant(&token.token_type) == token_type {
+                self.advance();
+            } else {
+                Self::report_error(token, message);
+            }
+        }
+    }
+
+    fn expression(&mut self) {
+        self.parse_precedence(Precedence::Assignment);
+    }
+
+    fn number(&mut self) {
+        let token = self.advance().unwrap(); // TODO
+        match token.token_type {
+            scanner::TokenType::Number(value) => self.chunk.write_constant(value, token.line),
+            _ => Self::report_error(&token, "Non-number token cannot be parsed as number."),
+        }
+    }
+
+    fn grouping(&mut self) {
+        self.consume(
+            mem::discriminant(&scanner::TokenType::LeftParen),
+            "Called grouping with no left parenthesis.",
+        );
+        self.expression();
+        self.consume(
+            mem::discriminant(&scanner::TokenType::RightParen),
+            "Expect ')' after a group expression.",
+        );
+    }
+
+    fn unary(&mut self) {
+        let token = self.advance().unwrap(); // TODO
+
+        self.parse_precedence(Precedence::Unary);
+        match token.token_type {
+            scanner::TokenType::Minus => self.chunk.write_chunk(chunk::OpCode::Negate, token.line),
+            _ => Self::report_error(&token, "Non-unary operation found."),
+        }
+    }
+
+    fn binary(&mut self) {
+        let token = self.advance().unwrap(); // TODO
+        let bin_rule = Self::get_rule(&token.token_type);
+        let precedence = bin_rule.precedence.increment();
+        self.parse_precedence(precedence); // TODO
+
+        match token.token_type {
+            scanner::TokenType::Minus => {
+                self.chunk.write_chunk(chunk::OpCode::Subtract, token.line)
+            }
+            scanner::TokenType::Plus => self.chunk.write_chunk(chunk::OpCode::Add, token.line),
+            scanner::TokenType::Star => self.chunk.write_chunk(chunk::OpCode::Multiply, token.line),
+            scanner::TokenType::Slash => self.chunk.write_chunk(chunk::OpCode::Divide, token.line),
+            _ => Self::report_error(&token, "Binary operation expected but not found."),
+        }
+    }
+
+    fn parse_precedence(&mut self, precedence: Precedence) {
+        let Some(current) = self.peek() else {
+            return; // TODO
+        };
+        let parse_rule = Self::get_rule(&current.token_type);
+
+        if let Some(prefix_fn) = parse_rule.prefix_fn {
+            prefix_fn(self);
+        }
+
+        while let Some(rule) = self.peek().map(|token| Self::get_rule(&token.token_type))
+            && precedence <= rule.precedence
+        {
+            if let Some(infix_fn) = rule.infix_fn {
+                infix_fn(self);
+            }
+        }
+    }
+
+    fn get_rule(token_type: &scanner::TokenType<'a>) -> ParseTableEntry<'a> {
+        match token_type {
+            scanner::TokenType::LeftParen => {
+                ParseTableEntry::new(Some(Self::grouping), None, Precedence::None)
+            }
+            scanner::TokenType::RightParen => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::LeftBrace => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::RightBrace => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Comma => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Dot => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Minus => {
+                ParseTableEntry::new(Some(Self::unary), Some(Self::binary), Precedence::Term)
+            }
+            scanner::TokenType::Plus => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Term)
+            }
+            scanner::TokenType::Semicolon => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Slash => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Factor)
+            }
+            scanner::TokenType::Star => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Factor)
+            }
+            scanner::TokenType::Bang => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::BangEqual => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Equal => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::EqualEqual => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Greater => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::GreaterEqual => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Less => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::LessEqual => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Identifier(_) => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::String(_) => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Number(_) => {
+                ParseTableEntry::new(Some(Self::number), None, Precedence::None)
+            }
+            scanner::TokenType::And => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Class => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Else => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::False => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::For => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Fun => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::If => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Nil => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Or => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Print => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Return => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Super => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::This => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::True => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Var => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::While => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Error(_) => ParseTableEntry::new(None, None, Precedence::None),
+        }
+    }
+
+    fn report_error(token: &scanner::Token<'a>, message: &str) {
+        eprint!("[line {}] Error", token.line);
+        match &token.token_type {
+            scanner::TokenType::Error(message) => eprintln!(" : {}", message),
+            other => eprintln!(" at {:?}: {}", other, message),
+        }
+    }
+
+    fn error(message: &str) {
+        eprintln!("Error occurred during parsing: {}", message);
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd)]
+enum Precedence {
+    None,
+    Assignment, // =
+    Or,         // or
+    And,        // and
+    Equality,   // == !=
+    Comparison, // > >= < <=
+    Term,       // + -
+    Factor,     // * /
+    Unary,      // ! -
+    Call,       // . ()
+    Primary,
+}
+
+impl Precedence {
+    fn increment(&self) -> Precedence {
+        match &self {
+            Precedence::None => Precedence::Assignment,
+            Precedence::Assignment => Precedence::Or,
+            Precedence::Or => Precedence::And,
+            Precedence::And => Precedence::Equality,
+            Precedence::Equality => Precedence::Comparison,
+            Precedence::Comparison => Precedence::Term,
+            Precedence::Term => Precedence::Factor,
+            Precedence::Factor => Precedence::Unary,
+            Precedence::Unary => Precedence::Call,
+            Precedence::Call => Precedence::Primary,
+            Precedence::Primary => Precedence::Primary, // This is highest so we can't increment higher anyway.
+        }
+    }
+}
+
+struct ParseTableEntry<'a> {
+    prefix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
+    infix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
+    precedence: Precedence,
+}
+
+impl<'a> ParseTableEntry<'a> {
+    fn new(
+        prefix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
+        infix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
+        precedence: Precedence,
+    ) -> Self {
+        ParseTableEntry {
+            prefix_fn,
+            infix_fn,
+            precedence,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chunk::*;
+
+    #[test]
+    fn basic_parse() {
+        let source = "2 + 3 * 4";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        chunk.disassemble_chunk("test");
+    }
+}
