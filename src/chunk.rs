@@ -48,11 +48,6 @@ impl Chunk {
         self.write_chunk(byte, line);
     }
 
-    pub fn add_constant(&mut self, constant: Value) -> usize {
-        self.constants.push(constant);
-        self.constants.len() - 1
-    }
-
     pub fn read_code(&self, index: usize) -> &OpCode {
         self.code.get(index).unwrap_or(&OpCode::Return)
     }
@@ -143,21 +138,20 @@ mod tests {
     #[test]
     fn add_constant() {
         let mut chunk = Chunk::new();
-        let index = chunk.add_constant(45.0);
+        chunk.write_constant(45.0, 0);
         let expected = Chunk {
-            code: vec![],
+            code: vec![OpCode::Constant(0)],
             constants: vec![45.0],
-            lines: vec![],
+            lines: vec![(1, 0)],
         };
         assert_eq!(expected, chunk);
-        assert_eq!(0, index);
     }
 
     #[test]
     fn many_constants() {
         let mut chunk = Chunk::new();
         for i in 0..300 {
-            chunk.add_constant(i.into());
+            chunk.write_constant(i.into(), 0);
         }
         chunk.write_constant(123.into(), 0);
         assert_eq!(OpCode::ConstantLong(300), *chunk.code.last().unwrap());

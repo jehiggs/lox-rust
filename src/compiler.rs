@@ -1,4 +1,5 @@
 use crate::chunk;
+use crate::error::Error;
 use crate::scanner;
 
 use std::iter;
@@ -7,11 +8,6 @@ use std::mem;
 pub struct Compiler<'a> {
     scanner: iter::Peekable<scanner::Scanner<'a>>,
     chunk: chunk::Chunk,
-}
-
-#[derive(Debug)]
-pub enum Error {
-    CompileError,
 }
 
 impl<'a> Compiler<'a> {

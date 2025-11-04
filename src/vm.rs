@@ -1,6 +1,7 @@
 use crate::chunk;
+use crate::compiler;
+use crate::error::Error;
 use crate::scanner;
-use std::fmt;
 
 const STACK_SIZE: usize = 256;
 
@@ -9,12 +10,6 @@ pub struct VM {
     chunk: chunk::Chunk,
     ip: usize,
     stack: Vec<chunk::Value>,
-}
-
-#[derive(Debug)]
-pub enum Error {
-    CompileError,
-    RuntimeError,
 }
 
 impl VM {
@@ -27,6 +22,8 @@ impl VM {
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
+        let compiler = compiler::Compiler::new(source);
+        let chunk = compiler.compile().expect("Did not get a valid chunk");
         // Compile goes here.
         let scanner = scanner::Scanner::new(source);
         let mut current_line = 255;
@@ -88,15 +85,6 @@ impl VM {
     fn debug_instruction(&self, instruction: &chunk::OpCode) {
         println!("{:?}", self.stack);
         self.chunk.disassemble_instruction(self.ip, instruction);
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::CompileError => f.write_str("Compile Error."),
-            Error::RuntimeError => f.write_str("Runtime Error."),
-        }
     }
 }
 
