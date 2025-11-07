@@ -19,7 +19,10 @@ impl<'a> Compiler<'a> {
     }
 
     pub fn compile(mut self) -> Result<chunk::Chunk, Error> {
-        self.expression();
+        self.expression()?;
+        if self.scanner.next().is_some() {
+            return Err(Error::CompileError);
+        }
         self.chunk.write_chunk(chunk::OpCode::Return, 0); // TODO fix the line?
         Ok(self.chunk)
     }
@@ -48,84 +51,119 @@ impl<'a> Compiler<'a> {
         self.scanner.peek()
     }
 
-    fn consume(&mut self, token_type: mem::Discriminant<scanner::TokenType<'a>>, message: &str) {
+    fn consume(
+        &mut self,
+        token_type: mem::Discriminant<scanner::TokenType<'a>>,
+        message: &str,
+    ) -> Result<(), Error> {
         if let Some(token) = self.peek() {
             if mem::discriminant(&token.token_type) == token_type {
                 self.advance();
+                Ok(())
             } else {
                 Self::report_error(token, message);
+                Err(Error::CompileError)
+            }
+        } else {
+            Err(Error::CompileError)
+        }
+    }
+
+    fn expression(&mut self) -> Result<(), Error> {
+        self.parse_precedence(Precedence::Assignment)
+    }
+
+    fn number(&mut self) -> Result<(), Error> {
+        let token = self.advance().ok_or(Error::CompileError)?;
+        match token.token_type {
+            scanner::TokenType::Number(value) => {
+                self.chunk.write_constant(value, token.line);
+                Ok(())
+            }
+            _ => {
+                Self::report_error(&token, "Non-number token cannot be parsed as number.");
+                Err(Error::CompileError)
             }
         }
     }
 
-    fn expression(&mut self) {
-        self.parse_precedence(Precedence::Assignment);
-    }
-
-    fn number(&mut self) {
-        let token = self.advance().unwrap(); // TODO
-        match token.token_type {
-            scanner::TokenType::Number(value) => self.chunk.write_constant(value, token.line),
-            _ => Self::report_error(&token, "Non-number token cannot be parsed as number."),
-        }
-    }
-
-    fn grouping(&mut self) {
+    fn grouping(&mut self) -> Result<(), Error> {
         self.consume(
             mem::discriminant(&scanner::TokenType::LeftParen),
             "Called grouping with no left parenthesis.",
-        );
-        self.expression();
+        )?;
+        self.expression()?;
         self.consume(
             mem::discriminant(&scanner::TokenType::RightParen),
             "Expect ')' after a group expression.",
-        );
+        )?;
+        Ok(())
     }
 
-    fn unary(&mut self) {
-        let token = self.advance().unwrap(); // TODO
+    fn unary(&mut self) -> Result<(), Error> {
+        let token = self.advance().ok_or(Error::CompileError)?; // TODO
 
-        self.parse_precedence(Precedence::Unary);
+        self.parse_precedence(Precedence::Unary)?;
         match token.token_type {
-            scanner::TokenType::Minus => self.chunk.write_chunk(chunk::OpCode::Negate, token.line),
-            _ => Self::report_error(&token, "Non-unary operation found."),
+            scanner::TokenType::Minus => {
+                self.chunk.write_chunk(chunk::OpCode::Negate, token.line);
+                Ok(())
+            }
+            _ => {
+                Self::report_error(&token, "Non-unary operation found.");
+                Err(Error::CompileError)
+            }
         }
     }
 
-    fn binary(&mut self) {
-        let token = self.advance().unwrap(); // TODO
+    fn binary(&mut self) -> Result<(), Error> {
+        let token = self.advance().ok_or(Error::CompileError)?;
         let bin_rule = Self::get_rule(&token.token_type);
         let precedence = bin_rule.precedence.increment();
-        self.parse_precedence(precedence); // TODO
+        self.parse_precedence(precedence)?;
 
         match token.token_type {
             scanner::TokenType::Minus => {
-                self.chunk.write_chunk(chunk::OpCode::Subtract, token.line)
+                self.chunk.write_chunk(chunk::OpCode::Subtract, token.line);
+                Ok(())
             }
-            scanner::TokenType::Plus => self.chunk.write_chunk(chunk::OpCode::Add, token.line),
-            scanner::TokenType::Star => self.chunk.write_chunk(chunk::OpCode::Multiply, token.line),
-            scanner::TokenType::Slash => self.chunk.write_chunk(chunk::OpCode::Divide, token.line),
-            _ => Self::report_error(&token, "Binary operation expected but not found."),
+            scanner::TokenType::Plus => {
+                self.chunk.write_chunk(chunk::OpCode::Add, token.line);
+                Ok(())
+            }
+            scanner::TokenType::Star => {
+                self.chunk.write_chunk(chunk::OpCode::Multiply, token.line);
+                Ok(())
+            }
+            scanner::TokenType::Slash => {
+                self.chunk.write_chunk(chunk::OpCode::Divide, token.line);
+                Ok(())
+            }
+            _ => {
+                Self::report_error(&token, "Binary operation expected but not found.");
+                Err(Error::CompileError)
+            }
         }
     }
 
-    fn parse_precedence(&mut self, precedence: Precedence) {
+    fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {
         let Some(current) = self.peek() else {
-            return; // TODO
+            return Err(Error::CompileError);
         };
         let parse_rule = Self::get_rule(&current.token_type);
 
         if let Some(prefix_fn) = parse_rule.prefix_fn {
-            prefix_fn(self);
+            prefix_fn(self)?;
         }
 
         while let Some(rule) = self.peek().map(|token| Self::get_rule(&token.token_type))
             && precedence <= rule.precedence
         {
             if let Some(infix_fn) = rule.infix_fn {
-                infix_fn(self);
+                infix_fn(self)?;
             }
         }
+        Ok(())
     }
 
     fn get_rule(token_type: &scanner::TokenType<'a>) -> ParseTableEntry<'a> {
@@ -230,16 +268,18 @@ impl Precedence {
     }
 }
 
+type ParseFn<'a> = fn(&mut Compiler<'a>) -> Result<(), Error>;
+
 struct ParseTableEntry<'a> {
-    prefix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
-    infix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
+    prefix_fn: Option<ParseFn<'a>>,
+    infix_fn: Option<ParseFn<'a>>,
     precedence: Precedence,
 }
 
 impl<'a> ParseTableEntry<'a> {
     fn new(
-        prefix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
-        infix_fn: Option<fn(&mut Compiler<'a>) -> ()>,
+        prefix_fn: Option<ParseFn<'a>>,
+        infix_fn: Option<ParseFn<'a>>,
         precedence: Precedence,
     ) -> Self {
         ParseTableEntry {
@@ -257,7 +297,7 @@ mod tests {
 
     #[test]
     fn basic_parse() {
-        let source = "2 + 3 * 4";
+        let source = "2 + 3 * ";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         chunk.disassemble_chunk("test");
