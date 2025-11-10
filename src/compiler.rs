@@ -19,6 +19,9 @@ impl<'a> Compiler<'a> {
     }
 
     pub fn compile(mut self) -> Result<chunk::Chunk, Error> {
+        if self.peek().is_none() {
+            return Ok(self.chunk);
+        }
         self.expression()?;
         if self.scanner.next().is_some() {
             return Err(Error::CompileError);
@@ -297,9 +300,175 @@ mod tests {
 
     #[test]
     fn basic_parse() {
-        let source = "2 + 3 * ";
+        let source = "1 - 2";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        chunk.disassemble_chunk("test");
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Subtract,
+                OpCode::Return,
+            ],
+            vec![1.0, 2.0],
+        );
+    }
+
+    #[test]
+    fn precedence_left() {
+        let source = "1 * 2 + 3";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Multiply,
+                OpCode::Constant(2),
+                OpCode::Add,
+                OpCode::Return,
+            ],
+            vec![1.0, 2.0, 3.0],
+        )
+    }
+
+    #[test]
+    fn precedence_right() {
+        let source = "1 + 2 / 3";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Constant(2),
+                OpCode::Divide,
+                OpCode::Add,
+                OpCode::Return,
+            ],
+            vec![1.0, 2.0, 3.0],
+        )
+    }
+
+    #[test]
+    fn unary() {
+        let source = "-1";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![OpCode::Constant(0), OpCode::Negate, OpCode::Return],
+            vec![1.0],
+        )
+    }
+
+    #[test]
+    fn prefix_and_infix() {
+        let source = "-1 + 2";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Negate,
+                OpCode::Constant(1),
+                OpCode::Add,
+                OpCode::Return,
+            ],
+            vec![1.0, 2.0],
+        )
+    }
+
+    #[test]
+    fn grouping() {
+        let source = "(1 + 2) * 3";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Add,
+                OpCode::Constant(2),
+                OpCode::Multiply,
+                OpCode::Return,
+            ],
+            vec![1.0, 2.0, 3.0],
+        )
+    }
+
+    #[test]
+    fn nested_grouping() {
+        let source = "1 + (2 * (3 + 4))";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Constant(2),
+                OpCode::Constant(3),
+                OpCode::Add,
+                OpCode::Multiply,
+                OpCode::Add,
+                OpCode::Return,
+            ],
+            vec![1.0, 2.0, 3.0, 4.0],
+        )
+    }
+
+    #[test]
+    fn empty() {
+        let source = "";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(&chunk, vec![], vec![])
+    }
+
+    #[test]
+    fn missing_arg() {
+        let source = "1 +";
+        let compiler = Compiler::new(source);
+        assert_eq!(Err(Error::CompileError), compiler.compile());
+    }
+
+    #[test]
+    fn dangling_unary() {
+        let source = "-";
+        let compiler = Compiler::new(source);
+        assert_eq!(Err(Error::CompileError), compiler.compile());
+    }
+
+    #[test]
+    fn missing_parens() {
+        let source = "(1 + 2";
+        let compiler = Compiler::new(source);
+        assert_eq!(Err(Error::CompileError), compiler.compile());
+    }
+
+    #[test]
+    fn spare_closing_parens() {
+        let source = "1 + 2) - 4";
+        let compiler = Compiler::new(source);
+        assert_eq!(Err(Error::CompileError), compiler.compile());
+    }
+
+    fn check_chunk(chunk: &Chunk, opcodes: Vec<OpCode>, constants: Vec<Value>) {
+        for (index, opcode) in opcodes.iter().enumerate() {
+            assert_eq!(opcode, chunk.read_code(index));
+            if let OpCode::Constant(const_index) = opcode {
+                assert_eq!(
+                    constants[usize::from(*const_index)],
+                    chunk.read_constant((*const_index).into())
+                )
+            }
+        }
+        assert_eq!(OpCode::Return, *chunk.read_code(opcodes.len()));
     }
 }
