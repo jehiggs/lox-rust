@@ -232,10 +232,6 @@ impl<'a> Compiler<'a> {
             other => eprintln!(" at {:?}: {}", other, message),
         }
     }
-
-    fn error(message: &str) {
-        eprintln!("Error occurred during parsing: {}", message);
-    }
 }
 
 #[derive(Debug, PartialEq, PartialOrd)]

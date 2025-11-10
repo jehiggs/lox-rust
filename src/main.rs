@@ -11,7 +11,7 @@ use std::io::Write;
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
-    let vm = vm::VM::new(chunk::Chunk::new());
+    let vm = vm::VM::new();
     if args.len() > 2 {
         eprintln!("Too many arguments: {:?}", args);
         eprintln!("Usage: rlox [file_path].");

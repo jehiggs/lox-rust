@@ -1,57 +1,48 @@
 use crate::chunk;
 use crate::compiler;
 use crate::error::Error;
-use crate::scanner;
 
 const STACK_SIZE: usize = 256;
 
 #[derive(Debug)]
 pub struct VM {
-    chunk: chunk::Chunk,
     ip: usize,
     stack: Vec<chunk::Value>,
 }
 
 impl VM {
-    pub fn new(chunk: chunk::Chunk) -> Self {
+    pub fn new() -> Self {
         VM {
-            chunk,
             ip: 0,
             stack: Vec::with_capacity(STACK_SIZE),
         }
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
+        self.reset();
         let compiler = compiler::Compiler::new(source);
-        let chunk = compiler.compile().expect("Did not get a valid chunk");
-        // Compile goes here.
-        let scanner = scanner::Scanner::new(source);
-        let mut current_line = 255;
-        for token in scanner {
-            if token.line != current_line {
-                current_line = token.line;
-                print!("{:>4}", current_line);
-            } else {
-                print!("{:>4}", "|");
-            }
-            println!(" {:?}", token.token_type);
-        }
-        Ok(())
+        let chunk = compiler.compile()?;
+        self.run(&chunk)
     }
 
-    fn run(&mut self) -> Result<(), Error> {
+    fn reset(&mut self) {
+        self.ip = 0;
+        self.stack.clear();
+    }
+
+    fn run(&mut self, chunk: &chunk::Chunk) -> Result<(), Error> {
         loop {
-            let instruction = self.chunk.read_code(self.ip);
+            let instruction = chunk.read_code(self.ip);
             #[cfg(debug_assertions)]
-            self.debug_instruction(instruction);
+            self.debug_instruction(chunk, instruction);
             self.ip += 1;
             match *instruction {
                 chunk::OpCode::Constant(index) => {
-                    let constant = self.chunk.read_constant(index.into());
+                    let constant = chunk.read_constant(index.into());
                     self.stack.push(constant);
                 }
                 chunk::OpCode::ConstantLong(index) => {
-                    let constant = self.chunk.read_constant(index);
+                    let constant = chunk.read_constant(index);
                     self.stack.push(constant);
                 }
                 chunk::OpCode::Return => {
@@ -64,56 +55,55 @@ impl VM {
                         self.stack.push(-value);
                     }
                 }
-                chunk::OpCode::Add => self.binary_op(std::ops::Add::add),
-                chunk::OpCode::Divide => self.binary_op(std::ops::Div::div),
-                chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul),
-                chunk::OpCode::Subtract => self.binary_op(std::ops::Sub::sub),
+                chunk::OpCode::Add => self.binary_op(std::ops::Add::add)?,
+                chunk::OpCode::Divide => self.binary_op(std::ops::Div::div)?,
+                chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul)?,
+                chunk::OpCode::Subtract => self.binary_op(std::ops::Sub::sub)?,
             }
         }
     }
 
-    fn binary_op<T: Fn(f64, f64) -> f64>(&mut self, op: T) {
+    fn binary_op<T: Fn(f64, f64) -> f64>(&mut self, op: T) -> Result<(), Error> {
         let a = self.stack.pop();
         let b = self.stack.pop();
         match (b, a) {
-            (Some(i), Some(j)) => self.stack.push(op(i, j)),
-            _ => panic!("Could not perform binary operation due to missing operands."),
+            (Some(i), Some(j)) => Ok(self.stack.push(op(i, j))),
+            _ => Err(Error::RuntimeError),
         }
     }
 
     #[cfg(debug_assertions)]
-    fn debug_instruction(&self, instruction: &chunk::OpCode) {
+    fn debug_instruction(&self, chunk: &chunk::Chunk, instruction: &chunk::OpCode) {
         println!("{:?}", self.stack);
-        self.chunk.disassemble_instruction(self.ip, instruction);
+        chunk.disassemble_instruction(self.ip, instruction);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::chunk::Chunk;
 
     use super::*;
 
     #[test]
     fn execute_binary_ops() {
-        let mut vm = VM::new(Chunk::new());
+        let mut vm = VM::new();
         vm.stack.push(1.0);
         vm.stack.push(2.0);
-        vm.binary_op(std::ops::Add::add);
+        vm.binary_op(std::ops::Add::add).unwrap();
         assert_eq!(3.0, vm.stack.pop().unwrap());
         vm.stack.push(4.0);
         vm.stack.push(3.0);
-        vm.binary_op(std::ops::Sub::sub);
+        vm.binary_op(std::ops::Sub::sub).unwrap();
         assert_eq!(1.0, vm.stack.pop().unwrap());
 
         vm.stack.push(2.0);
         vm.stack.push(3.0);
-        vm.binary_op(std::ops::Mul::mul);
+        vm.binary_op(std::ops::Mul::mul).unwrap();
         assert_eq!(6.0, vm.stack.pop().unwrap());
 
         vm.stack.push(6.0);
         vm.stack.push(3.0);
-        vm.binary_op(std::ops::Div::div);
+        vm.binary_op(std::ops::Div::div).unwrap();
         assert_eq!(2.0, vm.stack.pop().unwrap());
     }
 }
