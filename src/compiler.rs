@@ -24,7 +24,9 @@ impl<'a> Compiler<'a> {
         }
         self.expression()?;
         if self.scanner.next().is_some() {
-            return Err(Error::CompileError);
+            return Err(Error::CompileError(
+                "Compiler failed to parse all code in source.",
+            ));
         }
         self.chunk.write_chunk(chunk::OpCode::Return, 0); // TODO fix the line?
         Ok(self.chunk)
@@ -34,7 +36,10 @@ impl<'a> Compiler<'a> {
     fn advance(&mut self) -> Option<scanner::Token<'a>> {
         for token in self.scanner.by_ref() {
             match token.token_type {
-                scanner::TokenType::Error(message) => Self::report_error(&token, message),
+                scanner::TokenType::Error(message) => {
+                    // We don't want to return an error here - keep going instead.
+                    _ = Self::report_error(&token, message);
+                }
                 _ => return Some(token),
             }
         }
@@ -45,7 +50,8 @@ impl<'a> Compiler<'a> {
         while let Some(token) = self.scanner.peek() {
             match token.token_type {
                 scanner::TokenType::Error(message) => {
-                    Self::report_error(token, message);
+                    // We don't want to report an error here - keep going instead.
+                    _ = Self::report_error(token, message);
                     self.scanner.next();
                 }
                 _ => break,
@@ -57,18 +63,17 @@ impl<'a> Compiler<'a> {
     fn consume(
         &mut self,
         token_type: mem::Discriminant<scanner::TokenType<'a>>,
-        message: &str,
+        message: &'static str,
     ) -> Result<(), Error> {
         if let Some(token) = self.peek() {
             if mem::discriminant(&token.token_type) == token_type {
                 self.advance();
                 Ok(())
             } else {
-                Self::report_error(token, message);
-                Err(Error::CompileError)
+                Self::report_error(token, message)
             }
         } else {
-            Err(Error::CompileError)
+            Err(Self::error(message))
         }
     }
 
@@ -77,16 +82,15 @@ impl<'a> Compiler<'a> {
     }
 
     fn number(&mut self) -> Result<(), Error> {
-        let token = self.advance().ok_or(Error::CompileError)?;
+        let token = self
+            .advance()
+            .ok_or(Self::error("Missing required number token."))?;
         match token.token_type {
             scanner::TokenType::Number(value) => {
                 self.chunk.write_constant(value, token.line);
                 Ok(())
             }
-            _ => {
-                Self::report_error(&token, "Non-number token cannot be parsed as number.");
-                Err(Error::CompileError)
-            }
+            _ => Self::report_error(&token, "Non-number token cannot be parsed as number."),
         }
     }
 
@@ -104,7 +108,9 @@ impl<'a> Compiler<'a> {
     }
 
     fn unary(&mut self) -> Result<(), Error> {
-        let token = self.advance().ok_or(Error::CompileError)?; // TODO
+        let token = self
+            .advance()
+            .ok_or(Self::error("Missing required unary operation token."))?;
 
         self.parse_precedence(Precedence::Unary)?;
         match token.token_type {
@@ -112,15 +118,14 @@ impl<'a> Compiler<'a> {
                 self.chunk.write_chunk(chunk::OpCode::Negate, token.line);
                 Ok(())
             }
-            _ => {
-                Self::report_error(&token, "Non-unary operation found.");
-                Err(Error::CompileError)
-            }
+            _ => Self::report_error(&token, "Non-unary operation found."),
         }
     }
 
     fn binary(&mut self) -> Result<(), Error> {
-        let token = self.advance().ok_or(Error::CompileError)?;
+        let token = self
+            .advance()
+            .ok_or(Self::error("Missing required binary operation token."))?;
         let bin_rule = Self::get_rule(&token.token_type);
         let precedence = bin_rule.precedence.increment();
         self.parse_precedence(precedence)?;
@@ -142,17 +147,14 @@ impl<'a> Compiler<'a> {
                 self.chunk.write_chunk(chunk::OpCode::Divide, token.line);
                 Ok(())
             }
-            _ => {
-                Self::report_error(&token, "Binary operation expected but not found.");
-                Err(Error::CompileError)
-            }
+            _ => Self::report_error(&token, "Binary operation expected but not found."),
         }
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {
-        let Some(current) = self.peek() else {
-            return Err(Error::CompileError);
-        };
+        let current = self
+            .peek()
+            .ok_or(Self::error("Required more tokens to parse rule."))?;
         let parse_rule = Self::get_rule(&current.token_type);
 
         if let Some(prefix_fn) = parse_rule.prefix_fn {
@@ -225,12 +227,18 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn report_error(token: &scanner::Token<'a>, message: &str) {
+    fn report_error(token: &scanner::Token<'a>, message: &'static str) -> Result<(), Error> {
         eprint!("[line {}] Error", token.line);
         match &token.token_type {
             scanner::TokenType::Error(message) => eprintln!(" : {}", message),
             other => eprintln!(" at {:?}: {}", other, message),
         }
+        Err(Error::CompileError(message))
+    }
+
+    fn error(message: &'static str) -> Error {
+        eprintln!("Parse error occurred: {}", message);
+        Error::CompileError(message)
     }
 }
 
@@ -431,28 +439,32 @@ mod tests {
     fn missing_arg() {
         let source = "1 +";
         let compiler = Compiler::new(source);
-        assert_eq!(Err(Error::CompileError), compiler.compile());
+        let output = compiler.compile();
+        assert!(matches!(output, Err(Error::CompileError(_))));
     }
 
     #[test]
     fn dangling_unary() {
         let source = "-";
         let compiler = Compiler::new(source);
-        assert_eq!(Err(Error::CompileError), compiler.compile());
+        let output = compiler.compile();
+        assert!(matches!(output, Err(Error::CompileError(_))));
     }
 
     #[test]
     fn missing_parens() {
         let source = "(1 + 2";
         let compiler = Compiler::new(source);
-        assert_eq!(Err(Error::CompileError), compiler.compile());
+        let output = compiler.compile();
+        assert!(matches!(output, Err(Error::CompileError(_))));
     }
 
     #[test]
     fn spare_closing_parens() {
         let source = "1 + 2) - 4";
         let compiler = Compiler::new(source);
-        assert_eq!(Err(Error::CompileError), compiler.compile());
+        let output = compiler.compile();
+        assert!(matches!(output, Err(Error::CompileError(_))));
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: Vec<OpCode>, constants: Vec<Value>) {

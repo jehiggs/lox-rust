@@ -22,6 +22,8 @@ impl VM {
         self.reset();
         let compiler = compiler::Compiler::new(source);
         let chunk = compiler.compile()?;
+        #[cfg(debug_assertions)]
+        chunk.disassemble_chunk("Test");
         self.run(&chunk)
     }
 
@@ -68,7 +70,9 @@ impl VM {
         let b = self.stack.pop();
         match (b, a) {
             (Some(i), Some(j)) => Ok(self.stack.push(op(i, j))),
-            _ => Err(Error::RuntimeError),
+            _ => Err(Error::RuntimeError(
+                "Missing one or more operands to a binary operation.",
+            )),
         }
     }
 
