@@ -93,8 +93,7 @@ impl Chunk {
         self.print_code(code);
     }
 
-    #[cfg(debug_assertions)]
-    fn get_line(&self, index: usize) -> usize {
+    pub fn get_line(&self, index: usize) -> usize {
         let mut current = index;
         for (count, line) in &self.lines {
             if current < *count {

@@ -60,27 +60,32 @@ impl VM {
                     if let Some(chunk::Value::Number(value)) = self.stack.pop() {
                         self.stack.push(chunk::Value::Number(-value));
                     } else {
-                        return Err(Error::RuntimeError("Tried to negate non-number value."));
+                        return self.runtime_error(chunk, "Tried to negate non-number value.");
                     }
                 }
-                chunk::OpCode::Add => self.binary_op(std::ops::Add::add)?,
-                chunk::OpCode::Divide => self.binary_op(std::ops::Div::div)?,
-                chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul)?,
-                chunk::OpCode::Subtract => self.binary_op(std::ops::Sub::sub)?,
+                chunk::OpCode::Add => self.binary_op(std::ops::Add::add, chunk)?,
+                chunk::OpCode::Divide => self.binary_op(std::ops::Div::div, chunk)?,
+                chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul, chunk)?,
+                chunk::OpCode::Subtract => self.binary_op(std::ops::Sub::sub, chunk)?,
             }
         }
     }
 
-    fn binary_op<T: Fn(f64, f64) -> f64>(&mut self, op: T) -> Result<(), Error> {
+    fn binary_op<T: Fn(f64, f64) -> f64>(
+        &mut self,
+        op: T,
+        chunk: &chunk::Chunk,
+    ) -> Result<(), Error> {
         let a = self.stack.pop();
         let b = self.stack.pop();
         match (b, a) {
             (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
                 Ok(self.stack.push(chunk::Value::Number(op(i, j))))
             }
-            _ => Err(Error::RuntimeError(
-                "Missing one or more operands to a binary operation.",
-            )),
+            _ => self.runtime_error(
+                chunk,
+                "Operands were missing or incorrect to binary operation.",
+            ),
         }
     }
 
@@ -88,6 +93,15 @@ impl VM {
     fn debug_instruction(&self, chunk: &chunk::Chunk, instruction: &chunk::OpCode) {
         println!("{:?}", self.stack);
         chunk.disassemble_instruction(self.ip, instruction);
+    }
+
+    fn runtime_error(&self, chunk: &chunk::Chunk, message: &'static str) -> Result<(), Error> {
+        eprintln!(
+            "[Line {}] Error in script: {}",
+            chunk.get_line(self.ip),
+            message
+        );
+        Err(Error::RuntimeError(message))
     }
 }
 
