@@ -218,4 +218,12 @@ mod tests {
         let result = vm.interpret(source);
         assert!(matches!(result, Err(Error::RuntimeError(_))));
     }
+
+    #[test]
+    fn string_equality() {
+        let source = "\"foo\" == \"foo\"";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert_eq!(Ok(()), result);
+    }
 }
