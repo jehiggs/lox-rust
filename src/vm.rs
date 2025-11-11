@@ -45,11 +45,11 @@ impl VM {
             match *instruction {
                 chunk::OpCode::Constant(index) => {
                     let constant = chunk.read_constant(index.into());
-                    self.stack.push(*constant);
+                    self.stack.push(constant.clone());
                 }
                 chunk::OpCode::ConstantLong(index) => {
                     let constant = chunk.read_constant(index);
-                    self.stack.push(*constant);
+                    self.stack.push(constant.clone());
                 }
                 chunk::OpCode::Return => {
                     let value = self.stack.pop().unwrap_or(chunk::Value::Number(0.));
@@ -63,7 +63,11 @@ impl VM {
                         return self.runtime_error(chunk, "Tried to negate non-number value.");
                     }
                 }
-                chunk::OpCode::Add => self.binary_op(std::ops::Add::add, chunk)?,
+                chunk::OpCode::Add => match self.peek(0) {
+                    Some(chunk::Value::String(_)) => self.concatenate(chunk)?,
+                    Some(chunk::Value::Number(_)) => self.binary_op(std::ops::Add::add, chunk)?,
+                    _ => self.runtime_error(chunk, "Tried to add two non-addable types")?,
+                },
                 chunk::OpCode::Divide => self.binary_op(std::ops::Div::div, chunk)?,
                 chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul, chunk)?,
                 chunk::OpCode::Subtract => self.binary_op(std::ops::Sub::sub, chunk)?,
@@ -131,6 +135,21 @@ impl VM {
         }
     }
 
+    fn concatenate(&mut self, chunk: &chunk::Chunk) -> Result<(), Error> {
+        let a = self.stack.pop();
+        let b = self.stack.pop();
+        match (b, a) {
+            (Some(chunk::Value::String(mut prefix)), Some(chunk::Value::String(suffix))) => {
+                prefix.push_str(&suffix);
+                Ok(self.stack.push(chunk::Value::String(prefix)))
+            }
+            _ => self.runtime_error(
+                chunk,
+                "Operand was missing or incorrect in string concatenation.",
+            ),
+        }
+    }
+
     #[cfg(debug_assertions)]
     fn debug_instruction(&self, chunk: &chunk::Chunk, instruction: &chunk::OpCode) {
         println!("{:?}", self.stack);
@@ -179,6 +198,22 @@ mod tests {
     #[test]
     fn multiple_comparisons() {
         let source = "1 < 2 < 3";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert!(matches!(result, Err(Error::RuntimeError(_))));
+    }
+
+    #[test]
+    fn string_concatenate() {
+        let source = "\"foo\" + \"bar\"";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert_eq!(Ok(()), result);
+    }
+
+    #[test]
+    fn addition_wrong_types() {
+        let source = "1 + \"foo\"";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert!(matches!(result, Err(Error::RuntimeError(_))));

@@ -202,6 +202,20 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn string(&mut self) -> Result<(), Error> {
+        let token = self
+            .advance()
+            .ok_or_else(|| Self::error("Missing required string token."))?;
+        match token.token_type {
+            scanner::TokenType::String(string) => {
+                self.chunk
+                    .write_constant(chunk::Value::String(string.into()), token.line);
+                Ok(())
+            }
+            _ => Self::report_error(&token, "Did not get a string token when parsing a string."),
+        }
+    }
+
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {
         let current = self
             .peek()
@@ -268,7 +282,9 @@ impl<'a> Compiler<'a> {
                 ParseTableEntry::new(None, Some(Self::binary), Precedence::Comparison)
             }
             scanner::TokenType::Identifier(_) => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::String(_) => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::String(_) => {
+                ParseTableEntry::new(Some(Self::string), None, Precedence::None)
+            }
             scanner::TokenType::Number(_) => {
                 ParseTableEntry::new(Some(Self::number), None, Precedence::None)
             }
@@ -686,6 +702,33 @@ mod tests {
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(&chunk, vec![OpCode::Nil], vec![]);
+    }
+
+    #[test]
+    fn strings() {
+        let source = "\"foo\"";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![OpCode::Constant(0)],
+            vec![chunk::Value::String("foo".into())],
+        )
+    }
+
+    #[test]
+    fn addition_wrong_types() {
+        let source = "1 + \"foo\"";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![OpCode::Constant(0), OpCode::Constant(1), OpCode::Add],
+            vec![
+                chunk::Value::Number(1.0),
+                chunk::Value::String("foo".into()),
+            ],
+        );
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: Vec<OpCode>, constants: Vec<Value>) {

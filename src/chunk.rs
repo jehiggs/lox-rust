@@ -1,10 +1,11 @@
 use std::fmt;
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     Bool(bool),
     Number(f64),
     Nil,
+    String(String),
 }
 
 impl Value {
@@ -13,6 +14,7 @@ impl Value {
             Value::Bool(value) => !value,
             Value::Number(_) => false,
             Value::Nil => true,
+            Value::String(_) => false,
         }
     }
 }
@@ -23,6 +25,7 @@ impl fmt::Display for Value {
             Value::Bool(flag) => write!(f, "{}", flag),
             Value::Number(number) => write!(f, "{}", number),
             Value::Nil => write!(f, "nil"),
+            Value::String(string) => write!(f, "{}", string),
         }
     }
 }
