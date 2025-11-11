@@ -24,9 +24,7 @@ impl<'a> Compiler<'a> {
         }
         self.expression()?;
         if self.scanner.next().is_some() {
-            return Err(Error::CompileError(
-                "Compiler failed to parse all code in source.",
-            ));
+            return Err(Self::error("Compiler failed to parse all code in source."));
         }
         self.chunk.write_chunk(chunk::OpCode::Return, 0); // TODO fix the line?
         Ok(self.chunk)
@@ -84,10 +82,11 @@ impl<'a> Compiler<'a> {
     fn number(&mut self) -> Result<(), Error> {
         let token = self
             .advance()
-            .ok_or(Self::error("Missing required number token."))?;
+            .ok_or_else(|| Self::error("Missing required number token."))?;
         match token.token_type {
             scanner::TokenType::Number(value) => {
-                self.chunk.write_constant(value, token.line);
+                self.chunk
+                    .write_constant(chunk::Value::Number(value), token.line);
                 Ok(())
             }
             _ => Self::report_error(&token, "Non-number token cannot be parsed as number."),
@@ -110,7 +109,7 @@ impl<'a> Compiler<'a> {
     fn unary(&mut self) -> Result<(), Error> {
         let token = self
             .advance()
-            .ok_or(Self::error("Missing required unary operation token."))?;
+            .ok_or_else(|| Self::error("Missing required unary operation token."))?;
 
         self.parse_precedence(Precedence::Unary)?;
         match token.token_type {
@@ -125,7 +124,7 @@ impl<'a> Compiler<'a> {
     fn binary(&mut self) -> Result<(), Error> {
         let token = self
             .advance()
-            .ok_or(Self::error("Missing required binary operation token."))?;
+            .ok_or_else(|| Self::error("Missing required binary operation token."))?;
         let bin_rule = Self::get_rule(&token.token_type);
         let precedence = bin_rule.precedence.increment();
         self.parse_precedence(precedence)?;
@@ -154,7 +153,7 @@ impl<'a> Compiler<'a> {
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {
         let current = self
             .peek()
-            .ok_or(Self::error("Required more tokens to parse rule."))?;
+            .ok_or_else(|| Self::error("Required more tokens to parse rule."))?;
         let parse_rule = Self::get_rule(&current.token_type);
 
         if let Some(prefix_fn) = parse_rule.prefix_fn {
@@ -315,7 +314,7 @@ mod tests {
                 OpCode::Subtract,
                 OpCode::Return,
             ],
-            vec![1.0, 2.0],
+            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
@@ -334,7 +333,11 @@ mod tests {
                 OpCode::Add,
                 OpCode::Return,
             ],
-            vec![1.0, 2.0, 3.0],
+            vec![
+                chunk::Value::Number(1.0),
+                chunk::Value::Number(2.0),
+                chunk::Value::Number(3.0),
+            ],
         )
     }
 
@@ -353,7 +356,11 @@ mod tests {
                 OpCode::Add,
                 OpCode::Return,
             ],
-            vec![1.0, 2.0, 3.0],
+            vec![
+                chunk::Value::Number(1.0),
+                chunk::Value::Number(2.0),
+                chunk::Value::Number(3.0),
+            ],
         )
     }
 
@@ -365,7 +372,7 @@ mod tests {
         check_chunk(
             &chunk,
             vec![OpCode::Constant(0), OpCode::Negate, OpCode::Return],
-            vec![1.0],
+            vec![chunk::Value::Number(1.0)],
         )
     }
 
@@ -383,7 +390,7 @@ mod tests {
                 OpCode::Add,
                 OpCode::Return,
             ],
-            vec![1.0, 2.0],
+            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         )
     }
 
@@ -402,7 +409,11 @@ mod tests {
                 OpCode::Multiply,
                 OpCode::Return,
             ],
-            vec![1.0, 2.0, 3.0],
+            vec![
+                chunk::Value::Number(1.0),
+                chunk::Value::Number(2.0),
+                chunk::Value::Number(3.0),
+            ],
         )
     }
 
@@ -423,7 +434,12 @@ mod tests {
                 OpCode::Add,
                 OpCode::Return,
             ],
-            vec![1.0, 2.0, 3.0, 4.0],
+            vec![
+                chunk::Value::Number(1.0),
+                chunk::Value::Number(2.0),
+                chunk::Value::Number(3.0),
+                chunk::Value::Number(4.0),
+            ],
         )
     }
 
@@ -473,7 +489,7 @@ mod tests {
             if let OpCode::Constant(const_index) = opcode {
                 assert_eq!(
                     constants[usize::from(*const_index)],
-                    chunk.read_constant((*const_index).into())
+                    *chunk.read_constant((*const_index).into())
                 )
             }
         }

@@ -9,8 +9,8 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::CompileError(msg) => f.write_str("Compile Error: ").and(f.write_str(msg)),
-            Error::RuntimeError(msg) => f.write_str("Runtime Error: ").and(f.write_str(msg)),
+            Error::CompileError(msg) => write!(f, "Compile Error: {}", msg),
+            Error::RuntimeError(msg) => write!(f, "Runtime Error: {}", msg),
         }
     }
 }

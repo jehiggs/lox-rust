@@ -1,4 +1,21 @@
-pub type Value = f64;
+use std::fmt;
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Value {
+    Bool(bool),
+    Number(f64),
+    Nil,
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Bool(flag) => write!(f, "{}", flag),
+            Value::Number(number) => write!(f, "{}", number),
+            Value::Nil => write!(f, "nil"),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum OpCode {
@@ -52,8 +69,8 @@ impl Chunk {
         self.code.get(index).unwrap_or(&OpCode::Return)
     }
 
-    pub fn read_constant(&self, index: usize) -> Value {
-        self.constants[index]
+    pub fn read_constant(&self, index: usize) -> &Value {
+        &self.constants[index]
     }
 
     #[cfg(debug_assertions)]
@@ -138,10 +155,10 @@ mod tests {
     #[test]
     fn add_constant() {
         let mut chunk = Chunk::new();
-        chunk.write_constant(45.0, 0);
+        chunk.write_constant(Value::Number(45.0), 0);
         let expected = Chunk {
             code: vec![OpCode::Constant(0)],
-            constants: vec![45.0],
+            constants: vec![Value::Number(45.0)],
             lines: vec![(1, 0)],
         };
         assert_eq!(expected, chunk);
@@ -151,19 +168,20 @@ mod tests {
     fn many_constants() {
         let mut chunk = Chunk::new();
         for i in 0..300 {
-            chunk.write_constant(i.into(), 0);
+            let number = Value::Number(i.into());
+            chunk.write_constant(number, 0);
         }
-        chunk.write_constant(123.into(), 0);
+        chunk.write_constant(Value::Number(123.into()), 0);
         assert_eq!(OpCode::ConstantLong(300), *chunk.code.last().unwrap());
     }
 
     #[test]
     fn write_single_constant() {
         let mut chunk = Chunk::new();
-        chunk.write_constant(1.2, 0);
+        chunk.write_constant(Value::Number(1.2), 0);
         let expected = Chunk {
             code: vec![OpCode::Constant(0)],
-            constants: vec![1.2],
+            constants: vec![Value::Number(1.2)],
             lines: vec![(1, 0)],
         };
         assert_eq!(expected, chunk);
