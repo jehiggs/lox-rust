@@ -607,6 +607,87 @@ mod tests {
         )
     }
 
+    #[test]
+    fn greater_and_lesser() {
+        let source = "1 < 2 > 3";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Less,
+                OpCode::Constant(2),
+                OpCode::Greater,
+            ],
+            vec![
+                chunk::Value::Number(1.0),
+                chunk::Value::Number(2.0),
+                chunk::Value::Number(3.0),
+            ],
+        )
+    }
+
+    #[test]
+    fn greater_equal() {
+        let source = "1 >= 2";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Less,
+                OpCode::Not,
+            ],
+            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+        );
+    }
+
+    #[test]
+    fn less_equal() {
+        let source = "1 <= 2";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Greater,
+                OpCode::Not,
+            ],
+            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+        );
+    }
+
+    #[test]
+    fn not_equal() {
+        let source = "1 != 2";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Equal,
+                OpCode::Not,
+            ],
+            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+        );
+    }
+
+    #[test]
+    fn nil() {
+        let source = "nil";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(&chunk, vec![OpCode::Nil], vec![]);
+    }
+
     fn check_chunk(chunk: &Chunk, opcodes: Vec<OpCode>, constants: Vec<Value>) {
         for (index, opcode) in opcodes.iter().enumerate() {
             assert_eq!(opcode, chunk.read_code(index));

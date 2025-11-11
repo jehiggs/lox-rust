@@ -105,10 +105,8 @@ impl VM {
                         (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
                             self.stack.push(chunk::Value::Bool(i < j))
                         }
-                        _ => self.runtime_error(
-                            chunk,
-                            "Cannot compare greater two non-number operands.",
-                        )?,
+                        _ => self
+                            .runtime_error(chunk, "Cannot compare less two non-number operands.")?,
                     }
                 }
             }
@@ -173,6 +171,14 @@ mod tests {
     #[test]
     fn compare_non_numbers() {
         let source = "false > true";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert!(matches!(result, Err(Error::RuntimeError(_))));
+    }
+
+    #[test]
+    fn multiple_comparisons() {
+        let source = "1 < 2 < 3";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert!(matches!(result, Err(Error::RuntimeError(_))));
