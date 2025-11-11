@@ -70,6 +70,47 @@ impl VM {
                 chunk::OpCode::False => self.stack.push(chunk::Value::Bool(false)),
                 chunk::OpCode::Nil => self.stack.push(chunk::Value::Nil),
                 chunk::OpCode::True => self.stack.push(chunk::Value::Bool(true)),
+                chunk::OpCode::Not => {
+                    if let Some(value) = self.stack.pop() {
+                        self.stack.push(chunk::Value::Bool(value.is_falsey()))
+                    } else {
+                        return self
+                            .runtime_error(chunk, "Missing value to perform not operation.");
+                    }
+                }
+                chunk::OpCode::Equal => match (self.stack.pop(), self.stack.pop()) {
+                    (Some(a), Some(b)) => self.stack.push(chunk::Value::Bool(a == b)),
+                    _ => self.runtime_error(
+                        chunk,
+                        "Missing values when trying to compare for equality.",
+                    )?,
+                },
+                chunk::OpCode::Greater => {
+                    let a = self.stack.pop();
+                    let b = self.stack.pop();
+                    match (b, a) {
+                        (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
+                            self.stack.push(chunk::Value::Bool(i > j))
+                        }
+                        _ => self.runtime_error(
+                            chunk,
+                            "Cannot compare greater two non-number operands.",
+                        )?,
+                    }
+                }
+                chunk::OpCode::Less => {
+                    let a = self.stack.pop();
+                    let b = self.stack.pop();
+                    match (b, a) {
+                        (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
+                            self.stack.push(chunk::Value::Bool(i < j))
+                        }
+                        _ => self.runtime_error(
+                            chunk,
+                            "Cannot compare greater two non-number operands.",
+                        )?,
+                    }
+                }
             }
         }
     }
@@ -119,5 +160,21 @@ mod tests {
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert_eq!(Ok(()), result);
+    }
+
+    #[test]
+    fn negate_non_number() {
+        let source = "-false";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert!(matches!(result, Err(Error::RuntimeError(_))));
+    }
+
+    #[test]
+    fn compare_non_numbers() {
+        let source = "false > true";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert!(matches!(result, Err(Error::RuntimeError(_))));
     }
 }

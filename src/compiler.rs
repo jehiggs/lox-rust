@@ -117,6 +117,10 @@ impl<'a> Compiler<'a> {
                 self.chunk.write_chunk(chunk::OpCode::Negate, token.line);
                 Ok(())
             }
+            scanner::TokenType::Bang => {
+                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
+                Ok(())
+            }
             _ => Self::report_error(&token, "Non-unary operation found."),
         }
     }
@@ -144,6 +148,33 @@ impl<'a> Compiler<'a> {
             }
             scanner::TokenType::Slash => {
                 self.chunk.write_chunk(chunk::OpCode::Divide, token.line);
+                Ok(())
+            }
+            scanner::TokenType::BangEqual => {
+                self.chunk.write_chunk(chunk::OpCode::Equal, token.line);
+                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
+                Ok(())
+            }
+            scanner::TokenType::EqualEqual => {
+                self.chunk.write_chunk(chunk::OpCode::Equal, token.line);
+                Ok(())
+            }
+            scanner::TokenType::Greater => {
+                self.chunk.write_chunk(chunk::OpCode::Greater, token.line);
+                Ok(())
+            }
+            scanner::TokenType::GreaterEqual => {
+                self.chunk.write_chunk(chunk::OpCode::Less, token.line);
+                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
+                Ok(())
+            }
+            scanner::TokenType::Less => {
+                self.chunk.write_chunk(chunk::OpCode::Less, token.line);
+                Ok(())
+            }
+            scanner::TokenType::LessEqual => {
+                self.chunk.write_chunk(chunk::OpCode::Greater, token.line);
+                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
             _ => Self::report_error(&token, "Binary operation expected but not found."),
@@ -214,14 +245,28 @@ impl<'a> Compiler<'a> {
             scanner::TokenType::Star => {
                 ParseTableEntry::new(None, Some(Self::binary), Precedence::Factor)
             }
-            scanner::TokenType::Bang => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::BangEqual => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Bang => {
+                ParseTableEntry::new(Some(Self::unary), None, Precedence::None)
+            }
+            scanner::TokenType::BangEqual => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Equality)
+            }
             scanner::TokenType::Equal => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::EqualEqual => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::Greater => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::GreaterEqual => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::Less => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::LessEqual => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::EqualEqual => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Equality)
+            }
+            scanner::TokenType::Greater => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Comparison)
+            }
+            scanner::TokenType::GreaterEqual => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Comparison)
+            }
+            scanner::TokenType::Less => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Comparison)
+            }
+            scanner::TokenType::LessEqual => {
+                ParseTableEntry::new(None, Some(Self::binary), Precedence::Comparison)
+            }
             scanner::TokenType::Identifier(_) => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::String(_) => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Number(_) => {
@@ -532,6 +577,34 @@ mod tests {
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(&chunk, vec![OpCode::Nil], vec![]);
+    }
+
+    #[test]
+    fn not_operation() {
+        let source = "!true";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(&chunk, vec![OpCode::True, OpCode::Not], vec![]);
+    }
+
+    #[test]
+    fn negate_non_number() {
+        let source = "-false";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(&chunk, vec![OpCode::False, OpCode::Negate], vec![]);
+    }
+
+    #[test]
+    fn equality() {
+        let source = "1 == 2";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![OpCode::Constant(0), OpCode::Constant(1), OpCode::Equal],
+            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+        )
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: Vec<OpCode>, constants: Vec<Value>) {

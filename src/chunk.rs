@@ -7,6 +7,16 @@ pub enum Value {
     Nil,
 }
 
+impl Value {
+    pub fn is_falsey(&self) -> bool {
+        match self {
+            Value::Bool(value) => !value,
+            Value::Number(_) => false,
+            Value::Nil => true,
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -23,10 +33,14 @@ pub enum OpCode {
     Constant(u8),
     ConstantLong(usize),
     Divide,
+    Equal,
     False,
+    Greater,
+    Less,
     Multiply,
     Negate,
     Nil,
+    Not,
     Return,
     Subtract,
     True,
@@ -133,9 +147,13 @@ impl Chunk {
             OpCode::Divide => println!("Divide"),
             OpCode::Multiply => println!("Multiply"),
             OpCode::Subtract => println!("Subtract"),
-            OpCode::False => println!("false"),
-            OpCode::Nil => println!("nil"),
-            OpCode::True => println!("true"),
+            OpCode::False => println!("False"),
+            OpCode::Nil => println!("Nil"),
+            OpCode::True => println!("True"),
+            OpCode::Not => println!("Not"),
+            OpCode::Equal => println!("Equal"),
+            OpCode::Greater => println!("Greater"),
+            OpCode::Less => println!("Less"),
         }
     }
 }
@@ -190,5 +208,14 @@ mod tests {
             lines: vec![(1, 0)],
         };
         assert_eq!(expected, chunk);
+    }
+
+    #[test]
+    fn falsey_value() {
+        assert_eq!(true, Value::Bool(false).is_falsey());
+        assert_eq!(true, Value::Nil.is_falsey());
+        assert_eq!(false, Value::Bool(true).is_falsey());
+        assert_eq!(false, Value::Number(0.0).is_falsey());
+        assert_eq!(false, Value::Number(1.0).is_falsey());
     }
 }
