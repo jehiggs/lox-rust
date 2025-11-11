@@ -23,10 +23,13 @@ pub enum OpCode {
     Constant(u8),
     ConstantLong(usize),
     Divide,
+    False,
     Multiply,
     Negate,
+    Nil,
     Return,
     Subtract,
+    True,
 }
 
 #[derive(Debug, PartialEq)]
@@ -130,6 +133,9 @@ impl Chunk {
             OpCode::Divide => println!("Divide"),
             OpCode::Multiply => println!("Multiply"),
             OpCode::Subtract => println!("Subtract"),
+            OpCode::False => println!("false"),
+            OpCode::Nil => println!("nil"),
+            OpCode::True => println!("true"),
         }
     }
 }

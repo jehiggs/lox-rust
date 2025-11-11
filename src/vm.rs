@@ -67,6 +67,9 @@ impl VM {
                 chunk::OpCode::Divide => self.binary_op(std::ops::Div::div, chunk)?,
                 chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul, chunk)?,
                 chunk::OpCode::Subtract => self.binary_op(std::ops::Sub::sub, chunk)?,
+                chunk::OpCode::False => self.stack.push(chunk::Value::Bool(false)),
+                chunk::OpCode::Nil => self.stack.push(chunk::Value::Nil),
+                chunk::OpCode::True => self.stack.push(chunk::Value::Bool(true)),
             }
         }
     }

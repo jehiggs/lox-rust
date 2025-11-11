@@ -150,6 +150,27 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn literal(&mut self) -> Result<(), Error> {
+        let token = self
+            .advance()
+            .ok_or_else(|| Self::error("Missing reuqired literal token."))?;
+        match token.token_type {
+            scanner::TokenType::False => {
+                self.chunk.write_chunk(chunk::OpCode::False, token.line);
+                Ok(())
+            }
+            scanner::TokenType::True => {
+                self.chunk.write_chunk(chunk::OpCode::True, token.line);
+                Ok(())
+            }
+            scanner::TokenType::Nil => {
+                self.chunk.write_chunk(chunk::OpCode::Nil, token.line);
+                Ok(())
+            }
+            _ => Self::report_error(&token, "Did not get a literal token when parsing literal."),
+        }
+    }
+
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {
         let current = self
             .peek()
@@ -209,17 +230,23 @@ impl<'a> Compiler<'a> {
             scanner::TokenType::And => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Class => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Else => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::False => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::False => {
+                ParseTableEntry::new(Some(Self::literal), None, Precedence::None)
+            }
             scanner::TokenType::For => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Fun => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::If => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::Nil => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Nil => {
+                ParseTableEntry::new(Some(Self::literal), None, Precedence::None)
+            }
             scanner::TokenType::Or => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Print => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Return => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Super => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::This => ParseTableEntry::new(None, None, Precedence::None),
-            scanner::TokenType::True => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::True => {
+                ParseTableEntry::new(Some(Self::literal), None, Precedence::None)
+            }
             scanner::TokenType::Var => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::While => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Error(_) => ParseTableEntry::new(None, None, Precedence::None),
@@ -481,6 +508,30 @@ mod tests {
         let compiler = Compiler::new(source);
         let output = compiler.compile();
         assert!(matches!(output, Err(Error::CompileError(_))));
+    }
+
+    #[test]
+    fn true_value() {
+        let source = "true";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(&chunk, vec![OpCode::True], vec![]);
+    }
+
+    #[test]
+    fn false_value() {
+        let source = "false";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(&chunk, vec![OpCode::False], vec![]);
+    }
+
+    #[test]
+    fn nil_value() {
+        let source = "nil";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(&chunk, vec![OpCode::Nil], vec![]);
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: Vec<OpCode>, constants: Vec<Value>) {
