@@ -23,11 +23,13 @@ impl<'a> Compiler<'a> {
         if self.peek().is_none() {
             return Ok(self.chunk);
         }
-        self.expression()?;
+        while self.peek() != None {
+            self.declaration()?;
+        }
+
         if self.scanner.next().is_some() {
             return Err(Self::error("Compiler failed to parse all code in source."));
         }
-        self.chunk.write_chunk(chunk::OpCode::Return, 0); // TODO fix the line?
         Ok(self.chunk)
     }
 
@@ -74,6 +76,32 @@ impl<'a> Compiler<'a> {
         } else {
             Err(Self::error(message))
         }
+    }
+
+    fn declaration(&mut self) -> Result<(), Error> {
+        self.statement()?;
+        Ok(())
+    }
+
+    fn statement(&mut self) -> Result<(), Error> {
+        match self.peek().map(|token| &token.token_type) {
+            Some(scanner::TokenType::Print) => self.print_statement(),
+            _ => self.expression(),
+        }
+    }
+
+    fn print_statement(&mut self) -> Result<(), Error> {
+        let token = self
+            .advance()
+            .filter(|item| item.token_type == scanner::TokenType::Print)
+            .ok_or_else(|| Self::error("Missing required print token."))?;
+        self.expression()?;
+        self.consume(
+            mem::discriminant(&scanner::TokenType::Semicolon),
+            "Expect ; after value.",
+        )?;
+        self.chunk.write_chunk(chunk::OpCode::Print, token.line);
+        Ok(())
     }
 
     fn expression(&mut self) -> Result<(), Error> {
@@ -242,7 +270,9 @@ impl<'a> Compiler<'a> {
             scanner::TokenType::LeftParen => {
                 ParseTableEntry::new(Some(Self::grouping), None, Precedence::None)
             }
-            scanner::TokenType::RightParen => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::RightParen => {
+                ParseTableEntry::new(Some(Self::grouping), None, Precedence::None)
+            }
             scanner::TokenType::LeftBrace => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::RightBrace => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Comma => ParseTableEntry::new(None, None, Precedence::None),

@@ -45,6 +45,7 @@ pub enum OpCode {
     Negate,
     Nil,
     Not,
+    Print,
     Return,
     Subtract,
     True,
@@ -158,6 +159,7 @@ impl Chunk {
             OpCode::Equal => println!("Equal"),
             OpCode::Greater => println!("Greater"),
             OpCode::Less => println!("Less"),
+            OpCode::Print => println!("Print"),
         }
     }
 }

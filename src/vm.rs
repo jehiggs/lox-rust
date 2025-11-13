@@ -58,8 +58,6 @@ impl VM {
                     self.push_constant(constant);
                 }
                 chunk::OpCode::Return => {
-                    let value = self.stack.pop().unwrap_or(chunk::Value::Number(0.));
-                    println!("Output is: {}", value);
                     return Ok(());
                 }
                 chunk::OpCode::Negate => {
@@ -117,6 +115,14 @@ impl VM {
                         }
                         _ => self
                             .runtime_error(chunk, "Cannot compare less two non-number operands.")?,
+                    }
+                }
+                chunk::OpCode::Print => {
+                    let item = self.stack.pop();
+                    if let Some(value) = item {
+                        println!("{value}");
+                    } else {
+                        self.runtime_error(chunk, "Could not find a value to print.")?;
                     }
                 }
             }
