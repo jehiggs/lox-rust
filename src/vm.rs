@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn basic_arithmetic() {
-        let source = "1 + 2";
+        let source = "1 + 2;";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert_eq!(Ok(()), result);
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn negate_non_number() {
-        let source = "-false";
+        let source = "-false;";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert!(matches!(result, Err(Error::RuntimeError(_))));
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn compare_non_numbers() {
-        let source = "false > true";
+        let source = "false > true;";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert!(matches!(result, Err(Error::RuntimeError(_))));
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn multiple_comparisons() {
-        let source = "1 < 2 < 3";
+        let source = "1 < 2 < 3;";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert!(matches!(result, Err(Error::RuntimeError(_))));
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn string_concatenate() {
-        let source = "\"foo\" + \"bar\"";
+        let source = "\"foo\" + \"bar\";";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert_eq!(Ok(()), result);
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn addition_wrong_types() {
-        let source = "1 + \"foo\"";
+        let source = "1 + \"foo\";";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert!(matches!(result, Err(Error::RuntimeError(_))));
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn string_equality() {
-        let source = "\"foo\" == \"foo\"";
+        let source = "\"foo\" == \"foo\";";
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert_eq!(Ok(()), result);

@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn basic_parse() {
-        let source = "1 - 2";
+        let source = "1 - 2;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -445,7 +445,7 @@ mod tests {
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Subtract,
-                OpCode::Return,
+                OpCode::Pop,
             ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn precedence_left() {
-        let source = "1 * 2 + 3";
+        let source = "1 * 2 + 3;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -464,7 +464,7 @@ mod tests {
                 OpCode::Multiply,
                 OpCode::Constant(2),
                 OpCode::Add,
-                OpCode::Return,
+                OpCode::Pop,
             ],
             vec![
                 chunk::Value::Number(1.0),
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn precedence_right() {
-        let source = "1 + 2 / 3";
+        let source = "1 + 2 / 3;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -487,7 +487,7 @@ mod tests {
                 OpCode::Constant(2),
                 OpCode::Divide,
                 OpCode::Add,
-                OpCode::Return,
+                OpCode::Pop,
             ],
             vec![
                 chunk::Value::Number(1.0),
@@ -499,19 +499,19 @@ mod tests {
 
     #[test]
     fn unary() {
-        let source = "-1";
+        let source = "-1;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![OpCode::Constant(0), OpCode::Negate, OpCode::Return],
+            vec![OpCode::Constant(0), OpCode::Negate, OpCode::Pop],
             vec![chunk::Value::Number(1.0)],
         )
     }
 
     #[test]
     fn prefix_and_infix() {
-        let source = "-1 + 2";
+        let source = "-1 + 2;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -521,7 +521,7 @@ mod tests {
                 OpCode::Negate,
                 OpCode::Constant(1),
                 OpCode::Add,
-                OpCode::Return,
+                OpCode::Pop,
             ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         )
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn grouping() {
-        let source = "(1 + 2) * 3";
+        let source = "(1 + 2) * 3;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -540,7 +540,7 @@ mod tests {
                 OpCode::Add,
                 OpCode::Constant(2),
                 OpCode::Multiply,
-                OpCode::Return,
+                OpCode::Pop,
             ],
             vec![
                 chunk::Value::Number(1.0),
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn nested_grouping() {
-        let source = "1 + (2 * (3 + 4))";
+        let source = "1 + (2 * (3 + 4));";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -565,7 +565,7 @@ mod tests {
                 OpCode::Add,
                 OpCode::Multiply,
                 OpCode::Add,
-                OpCode::Return,
+                OpCode::Pop,
             ],
             vec![
                 chunk::Value::Number(1.0),
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn missing_parens() {
-        let source = "(1 + 2";
+        let source = "(1 + 2;";
         let compiler = Compiler::new(source);
         let output = compiler.compile();
         assert!(matches!(output, Err(Error::CompileError(_))));
@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn spare_closing_parens() {
-        let source = "1 + 2) - 4";
+        let source = "1 + 2) - 4;";
         let compiler = Compiler::new(source);
         let output = compiler.compile();
         assert!(matches!(output, Err(Error::CompileError(_))));
@@ -618,59 +618,68 @@ mod tests {
 
     #[test]
     fn true_value() {
-        let source = "true";
+        let source = "true;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::True], vec![]);
+        check_chunk(&chunk, vec![OpCode::True, OpCode::Pop], vec![]);
     }
 
     #[test]
     fn false_value() {
-        let source = "false";
+        let source = "false;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::False], vec![]);
+        check_chunk(&chunk, vec![OpCode::False, OpCode::Pop], vec![]);
     }
 
     #[test]
     fn nil_value() {
-        let source = "nil";
+        let source = "nil;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::Nil], vec![]);
+        check_chunk(&chunk, vec![OpCode::Nil, OpCode::Pop], vec![]);
     }
 
     #[test]
     fn not_operation() {
-        let source = "!true";
+        let source = "!true;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::True, OpCode::Not], vec![]);
+        check_chunk(&chunk, vec![OpCode::True, OpCode::Not, OpCode::Pop], vec![]);
     }
 
     #[test]
     fn negate_non_number() {
-        let source = "-false";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::False, OpCode::Negate], vec![]);
-    }
-
-    #[test]
-    fn equality() {
-        let source = "1 == 2";
+        let source = "-false;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![OpCode::Constant(0), OpCode::Constant(1), OpCode::Equal],
+            vec![OpCode::False, OpCode::Negate, OpCode::Pop],
+            vec![],
+        );
+    }
+
+    #[test]
+    fn equality() {
+        let source = "1 == 2;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Equal,
+                OpCode::Pop,
+            ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         )
     }
 
     #[test]
     fn greater_and_lesser() {
-        let source = "1 < 2 > 3";
+        let source = "1 < 2 > 3;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -681,6 +690,7 @@ mod tests {
                 OpCode::Less,
                 OpCode::Constant(2),
                 OpCode::Greater,
+                OpCode::Pop,
             ],
             vec![
                 chunk::Value::Number(1.0),
@@ -692,7 +702,7 @@ mod tests {
 
     #[test]
     fn greater_equal() {
-        let source = "1 >= 2";
+        let source = "1 >= 2;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -702,6 +712,7 @@ mod tests {
                 OpCode::Constant(1),
                 OpCode::Less,
                 OpCode::Not,
+                OpCode::Pop,
             ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -709,7 +720,7 @@ mod tests {
 
     #[test]
     fn less_equal() {
-        let source = "1 <= 2";
+        let source = "1 <= 2;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -719,6 +730,7 @@ mod tests {
                 OpCode::Constant(1),
                 OpCode::Greater,
                 OpCode::Not,
+                OpCode::Pop,
             ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -726,7 +738,7 @@ mod tests {
 
     #[test]
     fn not_equal() {
-        let source = "1 != 2";
+        let source = "1 != 2;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
@@ -736,39 +748,37 @@ mod tests {
                 OpCode::Constant(1),
                 OpCode::Equal,
                 OpCode::Not,
+                OpCode::Pop,
             ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
     #[test]
-    fn nil() {
-        let source = "nil";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::Nil], vec![]);
-    }
-
-    #[test]
     fn strings() {
-        let source = "\"foo\"";
+        let source = "\"foo\";";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![OpCode::Constant(0)],
+            vec![OpCode::Constant(0), OpCode::Pop],
             vec![chunk::Value::String(Rc::from(String::from("foo")))],
         )
     }
 
     #[test]
     fn addition_wrong_types() {
-        let source = "1 + \"foo\"";
+        let source = "1 + \"foo\";";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![OpCode::Constant(0), OpCode::Constant(1), OpCode::Add],
+            vec![
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::Add,
+                OpCode::Pop,
+            ],
             vec![
                 chunk::Value::Number(1.0),
                 chunk::Value::String(Rc::from(String::from("foo"))),
