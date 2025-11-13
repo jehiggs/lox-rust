@@ -1,11 +1,12 @@
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     Bool(bool),
     Number(f64),
     Nil,
-    String(String),
+    String(Rc<str>),
 }
 
 impl Value {

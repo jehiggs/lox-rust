@@ -1,13 +1,18 @@
+use std::collections::HashSet;
+use std::rc::Rc;
+
 use crate::chunk;
 use crate::compiler;
 use crate::error::Error;
 
 const STACK_SIZE: usize = 256;
+const STRING_TABLE_SIZE: usize = 10;
 
 #[derive(Debug)]
 pub struct VM {
     ip: usize,
     stack: Vec<chunk::Value>,
+    strings: HashSet<Rc<str>>,
 }
 
 impl VM {
@@ -15,6 +20,7 @@ impl VM {
         VM {
             ip: 0,
             stack: Vec::with_capacity(STACK_SIZE),
+            strings: HashSet::with_capacity(STRING_TABLE_SIZE),
         }
     }
 
@@ -42,14 +48,14 @@ impl VM {
             #[cfg(debug_assertions)]
             self.debug_instruction(chunk, instruction);
             self.ip += 1;
-            match *instruction {
-                chunk::OpCode::Constant(index) => {
+            match instruction {
+                &chunk::OpCode::Constant(index) => {
                     let constant = chunk.read_constant(index.into());
-                    self.stack.push(constant.clone());
+                    self.push_constant(constant);
                 }
-                chunk::OpCode::ConstantLong(index) => {
+                &chunk::OpCode::ConstantLong(index) => {
                     let constant = chunk.read_constant(index);
-                    self.stack.push(constant.clone());
+                    self.push_constant(constant);
                 }
                 chunk::OpCode::Return => {
                     let value = self.stack.pop().unwrap_or(chunk::Value::Number(0.));
@@ -117,6 +123,13 @@ impl VM {
         }
     }
 
+    fn push_constant(&mut self, constant: &chunk::Value) {
+        if let chunk::Value::String(string) = constant {
+            self.strings.insert(Rc::clone(&string));
+        }
+        self.stack.push(constant.clone());
+    }
+
     fn binary_op<T: Fn(f64, f64) -> f64>(
         &mut self,
         op: T,
@@ -139,9 +152,17 @@ impl VM {
         let a = self.stack.pop();
         let b = self.stack.pop();
         match (b, a) {
-            (Some(chunk::Value::String(mut prefix)), Some(chunk::Value::String(suffix))) => {
-                prefix.push_str(&suffix);
-                Ok(self.stack.push(chunk::Value::String(prefix)))
+            (Some(chunk::Value::String(prefix)), Some(chunk::Value::String(suffix))) => {
+                let string = format!("{}{}", prefix, suffix);
+                let new = match self.strings.get(&string[..]) {
+                    Some(item) => Rc::clone(item),
+                    None => {
+                        let item = Rc::from(&string[..]);
+                        self.strings.insert(Rc::clone(&item));
+                        item
+                    }
+                };
+                Ok(self.stack.push(chunk::Value::String(new)))
             }
             _ => self.runtime_error(
                 chunk,

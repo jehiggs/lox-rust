@@ -4,6 +4,7 @@ use crate::scanner;
 
 use std::iter;
 use std::mem;
+use std::rc::Rc;
 
 pub struct Compiler<'a> {
     scanner: iter::Peekable<scanner::Scanner<'a>>,
@@ -209,7 +210,7 @@ impl<'a> Compiler<'a> {
         match token.token_type {
             scanner::TokenType::String(string) => {
                 self.chunk
-                    .write_constant(chunk::Value::String(string.into()), token.line);
+                    .write_constant(chunk::Value::String(Rc::from(string)), token.line);
                 Ok(())
             }
             _ => Self::report_error(&token, "Did not get a string token when parsing a string."),
@@ -712,7 +713,7 @@ mod tests {
         check_chunk(
             &chunk,
             vec![OpCode::Constant(0)],
-            vec![chunk::Value::String("foo".into())],
+            vec![chunk::Value::String(Rc::from(String::from("foo")))],
         )
     }
 
@@ -726,7 +727,7 @@ mod tests {
             vec![OpCode::Constant(0), OpCode::Constant(1), OpCode::Add],
             vec![
                 chunk::Value::Number(1.0),
-                chunk::Value::String("foo".into()),
+                chunk::Value::String(Rc::from(String::from("foo"))),
             ],
         );
     }
