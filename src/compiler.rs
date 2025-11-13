@@ -86,7 +86,7 @@ impl<'a> Compiler<'a> {
     fn statement(&mut self) -> Result<(), Error> {
         match self.peek().map(|token| &token.token_type) {
             Some(scanner::TokenType::Print) => self.print_statement(),
-            _ => self.expression(),
+            _ => self.expression_statement(),
         }
     }
 
@@ -101,6 +101,20 @@ impl<'a> Compiler<'a> {
             "Expect ; after value.",
         )?;
         self.chunk.write_chunk(chunk::OpCode::Print, token.line);
+        Ok(())
+    }
+
+    fn expression_statement(&mut self) -> Result<(), Error> {
+        let line = self
+            .peek()
+            .map(|token| token.line)
+            .ok_or_else(|| Self::error("Expected a token in an expression statement."))?;
+        self.expression()?;
+        self.consume(
+            mem::discriminant(&scanner::TokenType::Semicolon),
+            "Expect ; after expression statement.",
+        )?;
+        self.chunk.write_chunk(chunk::OpCode::Pop, line);
         Ok(())
     }
 

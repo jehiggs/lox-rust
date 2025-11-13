@@ -125,6 +125,9 @@ impl VM {
                         self.runtime_error(chunk, "Could not find a value to print.")?;
                     }
                 }
+                chunk::OpCode::Pop => {
+                    self.stack.pop();
+                }
             }
         }
     }
