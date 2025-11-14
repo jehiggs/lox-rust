@@ -25,56 +25,58 @@ impl<'a> Scanner<'a> {
         self.source = &self.source[next_non_whitespace..];
         let mut iter = self.source.chars().peekable();
         match iter.next() {
-            Some('{') => self.parse_single_character(TokenType::LeftBrace),
-            Some('}') => self.parse_single_character(TokenType::RightBrace),
-            Some('(') => self.parse_single_character(TokenType::LeftParen),
-            Some(')') => self.parse_single_character(TokenType::RightParen),
-            Some(';') => self.parse_single_character(TokenType::Semicolon),
-            Some(',') => self.parse_single_character(TokenType::Comma),
-            Some('.') => self.parse_single_character(TokenType::Dot),
-            Some('+') => self.parse_single_character(TokenType::Plus),
-            Some('-') => self.parse_single_character(TokenType::Minus),
-            Some('*') => self.parse_single_character(TokenType::Star),
+            Some('{') => Some(self.parse_single_character(TokenType::LeftBrace)),
+            Some('}') => Some(self.parse_single_character(TokenType::RightBrace)),
+            Some('(') => Some(self.parse_single_character(TokenType::LeftParen)),
+            Some(')') => Some(self.parse_single_character(TokenType::RightParen)),
+            Some(';') => Some(self.parse_single_character(TokenType::Semicolon)),
+            Some(',') => Some(self.parse_single_character(TokenType::Comma)),
+            Some('.') => Some(self.parse_single_character(TokenType::Dot)),
+            Some('+') => Some(self.parse_single_character(TokenType::Plus)),
+            Some('-') => Some(self.parse_single_character(TokenType::Minus)),
+            Some('*') => Some(self.parse_single_character(TokenType::Star)),
             Some('/') => {
                 if let Some('/') = iter.next() {
                     let idx = self.source.find('\n').unwrap_or(self.source.len());
                     self.source = &self.source[idx..];
                     self.parse()
                 } else {
-                    self.parse_single_character(TokenType::Slash)
+                    Some(self.parse_single_character(TokenType::Slash))
                 }
             }
-            Some('!') => self.parse_double_character(TokenType::Bang, TokenType::BangEqual),
-            Some('=') => self.parse_double_character(TokenType::Equal, TokenType::EqualEqual),
-            Some('>') => self.parse_double_character(TokenType::Greater, TokenType::GreaterEqual),
-            Some('<') => self.parse_double_character(TokenType::Less, TokenType::LessEqual),
-            Some('"') => self.parse_string(),
-            Some(c) if c.is_numeric() => self.parse_numeric(),
-            Some(_) => self.parse_identifier(),
+            Some('!') => Some(self.parse_double_character(TokenType::Bang, TokenType::BangEqual)),
+            Some('=') => Some(self.parse_double_character(TokenType::Equal, TokenType::EqualEqual)),
+            Some('>') => {
+                Some(self.parse_double_character(TokenType::Greater, TokenType::GreaterEqual))
+            }
+            Some('<') => Some(self.parse_double_character(TokenType::Less, TokenType::LessEqual)),
+            Some('"') => Some(self.parse_string()),
+            Some(c) if c.is_numeric() => Some(self.parse_numeric()),
+            Some(_) => Some(self.parse_identifier()),
             None => None,
         }
     }
 
-    fn parse_single_character(&mut self, token_type: TokenType<'a>) -> Option<Token<'a>> {
+    fn parse_single_character(&mut self, token_type: TokenType<'a>) -> Token<'a> {
         self.source = &self.source[1..];
-        Some(Token::new(self.line, token_type))
+        Token::new(self.line, token_type)
     }
 
     fn parse_double_character(
         &mut self,
         single_token: TokenType<'a>,
         double_token: TokenType<'a>,
-    ) -> Option<Token<'a>> {
+    ) -> Token<'a> {
         if let Some('=') = self.source.chars().nth(1) {
             self.source = &self.source[2..];
-            Some(Token::new(self.line, double_token))
+            Token::new(self.line, double_token)
         } else {
             self.source = &self.source[1..];
-            Some(Token::new(self.line, single_token))
+            Token::new(self.line, single_token)
         }
     }
 
-    fn parse_string(&mut self) -> Option<Token<'a>> {
+    fn parse_string(&mut self) -> Token<'a> {
         // Remove the initial quote.
         self.source = &self.source[1..];
         let current_line = self.line;
@@ -83,13 +85,10 @@ impl<'a> Scanner<'a> {
             // Need to go past the terminating quote, hence the +1.
             self.source = &self.source[idx + 1..];
             self.line += literal.chars().filter(|&c| c == '\n').count();
-            Some(Token::new(current_line, TokenType::String(literal)))
+            Token::new(current_line, TokenType::String(literal))
         } else {
             self.source = &self.source[self.source.len()..];
-            Some(Token::new(
-                current_line,
-                TokenType::Error(UNTERMINATED_ERROR),
-            ))
+            Token::new(current_line, TokenType::Error(UNTERMINATED_ERROR))
         }
     }
 
@@ -109,17 +108,14 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn parse_numeric(&mut self) -> Option<Token<'a>> {
+    fn parse_numeric(&mut self) -> Token<'a> {
         let idx = self.number_end_index();
         let number = &self.source[0..idx];
         self.source = &self.source[idx..];
-        Some(Token::new(
-            self.line,
-            TokenType::Number(number.parse::<f64>().unwrap()),
-        ))
+        Token::new(self.line, TokenType::Number(number.parse::<f64>().unwrap()))
     }
 
-    fn parse_identifier(&mut self) -> Option<Token<'a>> {
+    fn parse_identifier(&mut self) -> Token<'a> {
         let ident = if let Some(idx) = self.source.find(|c: char| !c.is_alphanumeric() && c != '_')
         {
             let ident = &self.source[0..idx];
@@ -130,13 +126,11 @@ impl<'a> Scanner<'a> {
             self.source = &self.source[self.source.len()..];
             ident
         };
-        let token_type = self
-            .check_keyword(ident)
-            .unwrap_or(TokenType::Identifier(ident));
-        Some(Token::new(self.line, token_type))
+        let token_type = Self::check_keyword(ident).unwrap_or(TokenType::Identifier(ident));
+        Token::new(self.line, token_type)
     }
 
-    fn check_keyword(&self, ident: &'a str) -> Option<TokenType<'a>> {
+    fn check_keyword(ident: &'a str) -> Option<TokenType<'a>> {
         match ident {
             "and" => Some(TokenType::And),
             "class" => Some(TokenType::Class),

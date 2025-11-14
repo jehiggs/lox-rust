@@ -279,6 +279,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    #[allow(clippy::match_same_arms)]
     fn get_rule(token_type: &scanner::TokenType<'a>) -> ParseTableEntry<'a> {
         match token_type {
             scanner::TokenType::LeftParen => {
@@ -390,8 +391,8 @@ enum Precedence {
 }
 
 impl Precedence {
-    fn increment(&self) -> Precedence {
-        match &self {
+    fn increment(self) -> Precedence {
+        match self {
             Precedence::None => Precedence::Assignment,
             Precedence::Assignment => Precedence::Or,
             Precedence::Or => Precedence::And,
@@ -401,8 +402,7 @@ impl Precedence {
             Precedence::Term => Precedence::Factor,
             Precedence::Factor => Precedence::Unary,
             Precedence::Unary => Precedence::Call,
-            Precedence::Call => Precedence::Primary,
-            Precedence::Primary => Precedence::Primary, // This is highest so we can't increment higher anyway.
+            Precedence::Call | Precedence::Primary => Precedence::Primary, // Safe to return highest if already there.
         }
     }
 }
@@ -441,13 +441,13 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Subtract,
                 OpCode::Pop,
             ],
-            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+            &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
@@ -458,7 +458,7 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Multiply,
@@ -466,7 +466,7 @@ mod tests {
                 OpCode::Add,
                 OpCode::Pop,
             ],
-            vec![
+            &[
                 chunk::Value::Number(1.0),
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
@@ -481,7 +481,7 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Constant(2),
@@ -489,7 +489,7 @@ mod tests {
                 OpCode::Add,
                 OpCode::Pop,
             ],
-            vec![
+            &[
                 chunk::Value::Number(1.0),
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
@@ -504,8 +504,8 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![OpCode::Constant(0), OpCode::Negate, OpCode::Pop],
-            vec![chunk::Value::Number(1.0)],
+            &[OpCode::Constant(0), OpCode::Negate, OpCode::Pop],
+            &[chunk::Value::Number(1.0)],
         );
     }
 
@@ -516,14 +516,14 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Negate,
                 OpCode::Constant(1),
                 OpCode::Add,
                 OpCode::Pop,
             ],
-            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+            &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
@@ -534,7 +534,7 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Add,
@@ -542,7 +542,7 @@ mod tests {
                 OpCode::Multiply,
                 OpCode::Pop,
             ],
-            vec![
+            &[
                 chunk::Value::Number(1.0),
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
@@ -557,7 +557,7 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Constant(2),
@@ -567,7 +567,7 @@ mod tests {
                 OpCode::Add,
                 OpCode::Pop,
             ],
-            vec![
+            &[
                 chunk::Value::Number(1.0),
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
@@ -581,7 +581,7 @@ mod tests {
         let source = "";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![], vec![]);
+        check_chunk(&chunk, &[], &[]);
     }
 
     #[test]
@@ -621,7 +621,7 @@ mod tests {
         let source = "true;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::True, OpCode::Pop], vec![]);
+        check_chunk(&chunk, &[OpCode::True, OpCode::Pop], &[]);
     }
 
     #[test]
@@ -629,7 +629,7 @@ mod tests {
         let source = "false;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::False, OpCode::Pop], vec![]);
+        check_chunk(&chunk, &[OpCode::False, OpCode::Pop], &[]);
     }
 
     #[test]
@@ -637,7 +637,7 @@ mod tests {
         let source = "nil;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::Nil, OpCode::Pop], vec![]);
+        check_chunk(&chunk, &[OpCode::Nil, OpCode::Pop], &[]);
     }
 
     #[test]
@@ -645,7 +645,7 @@ mod tests {
         let source = "!true;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![OpCode::True, OpCode::Not, OpCode::Pop], vec![]);
+        check_chunk(&chunk, &[OpCode::True, OpCode::Not, OpCode::Pop], &[]);
     }
 
     #[test]
@@ -653,11 +653,7 @@ mod tests {
         let source = "-false;";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(
-            &chunk,
-            vec![OpCode::False, OpCode::Negate, OpCode::Pop],
-            vec![],
-        );
+        check_chunk(&chunk, &[OpCode::False, OpCode::Negate, OpCode::Pop], &[]);
     }
 
     #[test]
@@ -667,13 +663,13 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Equal,
                 OpCode::Pop,
             ],
-            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+            &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
@@ -684,7 +680,7 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Less,
@@ -692,7 +688,7 @@ mod tests {
                 OpCode::Greater,
                 OpCode::Pop,
             ],
-            vec![
+            &[
                 chunk::Value::Number(1.0),
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
@@ -707,14 +703,14 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Less,
                 OpCode::Not,
                 OpCode::Pop,
             ],
-            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+            &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
@@ -725,14 +721,14 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Greater,
                 OpCode::Not,
                 OpCode::Pop,
             ],
-            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+            &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
@@ -743,14 +739,14 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Equal,
                 OpCode::Not,
                 OpCode::Pop,
             ],
-            vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
+            &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
     }
 
@@ -761,8 +757,8 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![OpCode::Constant(0), OpCode::Pop],
-            vec![chunk::Value::String(Rc::from(String::from("foo")))],
+            &[OpCode::Constant(0), OpCode::Pop],
+            &[chunk::Value::String(Rc::from(String::from("foo")))],
         );
     }
 
@@ -773,20 +769,20 @@ mod tests {
         let chunk = compiler.compile().unwrap();
         check_chunk(
             &chunk,
-            vec![
+            &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
                 OpCode::Add,
                 OpCode::Pop,
             ],
-            vec![
+            &[
                 chunk::Value::Number(1.0),
                 chunk::Value::String(Rc::from(String::from("foo"))),
             ],
         );
     }
 
-    fn check_chunk(chunk: &Chunk, opcodes: Vec<OpCode>, constants: Vec<Value>) {
+    fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {
         for (index, opcode) in opcodes.iter().enumerate() {
             assert_eq!(opcode, chunk.read_code(index));
             if let OpCode::Constant(const_index) = opcode {
