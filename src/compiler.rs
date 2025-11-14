@@ -23,14 +23,15 @@ impl<'a> Compiler<'a> {
         if self.peek().is_none() {
             return Ok(self.chunk);
         }
+        let mut result = Ok(());
         while self.peek().is_some() {
-            self.declaration()?;
+            result = self.declaration();
         }
 
         if self.scanner.next().is_some() {
             return Err(Self::error("Compiler failed to parse all code in source."));
         }
-        Ok(self.chunk)
+        result.map(|()| self.chunk)
     }
 
     // Returns the current token to process!
@@ -78,8 +79,32 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn synchronize(&mut self) {
+        while let Some(token) = self.peek() {
+            match token.token_type {
+                scanner::TokenType::Class
+                | scanner::TokenType::Fun
+                | scanner::TokenType::Var
+                | scanner::TokenType::For
+                | scanner::TokenType::If
+                | scanner::TokenType::While
+                | scanner::TokenType::Print
+                | scanner::TokenType::Return => {
+                    return;
+                }
+                scanner::TokenType::Semicolon => {
+                    self.scanner.next();
+                    return;
+                }
+                _ => {
+                    self.scanner.next();
+                }
+            }
+        }
+    }
+
     fn declaration(&mut self) -> Result<(), Error> {
-        self.statement()?;
+        self.statement().inspect_err(|_| self.synchronize())?;
         Ok(())
     }
 
