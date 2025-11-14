@@ -356,7 +356,7 @@ mod tests {
                 Token::new(0, TokenType::While)
             ],
             scanner.collect::<Vec<_>>()
-        )
+        );
     }
 
     #[test]
@@ -371,7 +371,7 @@ mod tests {
                 Token::new(0, TokenType::Identifier("o"))
             ],
             scanner.collect::<Vec<_>>()
-        )
+        );
     }
 
     #[test]
@@ -384,20 +384,20 @@ mod tests {
                 Token::new(0, TokenType::Identifier("abc"))
             ],
             scanner.collect::<Vec<_>>()
-        )
+        );
     }
 
     #[test]
     fn empty_string_returns_none() {
         let text = "";
         let scanner = Scanner::new(text);
-        assert_eq!(Vec::<Token>::new(), scanner.collect::<Vec<Token>>())
+        assert_eq!(Vec::<Token>::new(), scanner.collect::<Vec<Token>>());
     }
 
     #[test]
     fn only_whitespace_returns_none() {
         let text = "   \n";
         let scanner = Scanner::new(text);
-        assert_eq!(Vec::<Token>::new(), scanner.collect::<Vec<Token>>())
+        assert_eq!(Vec::<Token>::new(), scanner.collect::<Vec<Token>>());
     }
 }

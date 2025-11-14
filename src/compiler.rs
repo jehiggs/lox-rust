@@ -471,7 +471,7 @@ mod tests {
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
             ],
-        )
+        );
     }
 
     #[test]
@@ -547,7 +547,7 @@ mod tests {
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
             ],
-        )
+        );
     }
 
     #[test]
@@ -573,7 +573,7 @@ mod tests {
                 chunk::Value::Number(3.0),
                 chunk::Value::Number(4.0),
             ],
-        )
+        );
     }
 
     #[test]
@@ -581,7 +581,7 @@ mod tests {
         let source = "";
         let compiler = Compiler::new(source);
         let chunk = compiler.compile().unwrap();
-        check_chunk(&chunk, vec![], vec![])
+        check_chunk(&chunk, vec![], vec![]);
     }
 
     #[test]
@@ -674,7 +674,7 @@ mod tests {
                 OpCode::Pop,
             ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
-        )
+        );
     }
 
     #[test]
@@ -697,7 +697,7 @@ mod tests {
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
             ],
-        )
+        );
     }
 
     #[test]
@@ -763,7 +763,7 @@ mod tests {
             &chunk,
             vec![OpCode::Constant(0), OpCode::Pop],
             vec![chunk::Value::String(Rc::from(String::from("foo")))],
-        )
+        );
     }
 
     #[test]
@@ -793,7 +793,7 @@ mod tests {
                 assert_eq!(
                     constants[usize::from(*const_index)],
                     *chunk.read_constant((*const_index).into())
-                )
+                );
             }
         }
         assert_eq!(OpCode::Return, *chunk.read_code(opcodes.len()));
