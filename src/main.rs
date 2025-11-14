@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 mod chunk;
 mod compiler;
 mod error;
@@ -13,7 +15,7 @@ fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     let vm = vm::VM::new();
     if args.len() > 2 {
-        eprintln!("Too many arguments: {:?}", args);
+        eprintln!("Too many arguments: {args:?}");
         eprintln!("Usage: rlox [file_path].");
         Err("Too many arguments".into())
     } else if let Some(file) = args.get(1) {
@@ -39,5 +41,5 @@ fn repl(mut vm: vm::VM) -> Result<(), String> {
 
 fn run_file(mut vm: vm::VM, file: &str) -> Result<(), String> {
     let content = fs::read_to_string(file).map_err(|err| err.to_string())?;
-    vm.interpret(&content).map_err(|err| format!("{:?}", err))
+    vm.interpret(&content).map_err(|err| format!("{err:?}"))
 }

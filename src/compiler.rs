@@ -374,7 +374,7 @@ impl<'a> Compiler<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
 enum Precedence {
     None,
     Assignment, // =
@@ -494,7 +494,7 @@ mod tests {
                 chunk::Value::Number(2.0),
                 chunk::Value::Number(3.0),
             ],
-        )
+        );
     }
 
     #[test]
@@ -506,7 +506,7 @@ mod tests {
             &chunk,
             vec![OpCode::Constant(0), OpCode::Negate, OpCode::Pop],
             vec![chunk::Value::Number(1.0)],
-        )
+        );
     }
 
     #[test]
@@ -524,7 +524,7 @@ mod tests {
                 OpCode::Pop,
             ],
             vec![chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
-        )
+        );
     }
 
     #[test]

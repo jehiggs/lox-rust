@@ -13,9 +13,8 @@ impl Value {
     pub fn is_falsey(&self) -> bool {
         match self {
             Value::Bool(value) => !value,
-            Value::Number(_) => false,
+            Value::Number(_) | Value::String(_) => false,
             Value::Nil => true,
-            Value::String(_) => false,
         }
     }
 }
@@ -23,10 +22,10 @@ impl Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Bool(flag) => write!(f, "{}", flag),
-            Value::Number(number) => write!(f, "{}", number),
+            Value::Bool(flag) => write!(f, "{flag}"),
+            Value::Number(number) => write!(f, "{number}"),
             Value::Nil => write!(f, "nil"),
-            Value::String(string) => write!(f, "{}", string),
+            Value::String(string) => write!(f, "{string}"),
         }
     }
 }
@@ -98,7 +97,7 @@ impl Chunk {
 
     #[cfg(debug_assertions)]
     pub fn disassemble_chunk(&self, name: &str) {
-        println!("== {} ==", name);
+        println!("== {name} ==");
         for (i, code) in self.code.iter().enumerate() {
             self.disassemble_instruction(i, code);
         }
@@ -106,12 +105,12 @@ impl Chunk {
 
     #[cfg(debug_assertions)]
     pub fn disassemble_instruction(&self, index: usize, code: &OpCode) {
-        print!("{:04} ", index);
+        print!("{index:04} ");
         let line = self.get_line(index);
         if index > 0 && line == self.get_line(index - 1) {
             print!("{:>4} ", "|");
         } else {
-            print!("{:>4} ", line);
+            print!("{line:>4} ");
         }
         self.print_code(code);
     }
@@ -121,9 +120,8 @@ impl Chunk {
         for (count, line) in &self.lines {
             if current < *count {
                 return *line;
-            } else {
-                current -= count;
             }
+            current -= count;
         }
         0
     }
@@ -180,7 +178,7 @@ mod tests {
             constants: vec![],
             lines: vec![(1, 0)],
         };
-        assert_eq!(expected, chunk)
+        assert_eq!(expected, chunk);
     }
 
     #[test]
