@@ -220,10 +220,10 @@ mod tests {
 
     #[test]
     fn falsey_value() {
-        assert_eq!(true, Value::Bool(false).is_falsey());
-        assert_eq!(true, Value::Nil.is_falsey());
-        assert_eq!(false, Value::Bool(true).is_falsey());
-        assert_eq!(false, Value::Number(0.0).is_falsey());
-        assert_eq!(false, Value::Number(1.0).is_falsey());
+        assert!(Value::Bool(false).is_falsey());
+        assert!(Value::Nil.is_falsey());
+        assert!(Value::Bool(true).is_falsey());
+        assert!(!Value::Number(0.0).is_falsey());
+        assert!(!Value::Number(1.0).is_falsey());
     }
 }

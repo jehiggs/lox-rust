@@ -23,7 +23,7 @@ impl<'a> Compiler<'a> {
         if self.peek().is_none() {
             return Ok(self.chunk);
         }
-        while self.peek() != None {
+        while self.peek().is_some() {
             self.declaration()?;
         }
 

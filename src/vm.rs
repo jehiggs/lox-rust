@@ -134,7 +134,7 @@ impl VM {
 
     fn push_constant(&mut self, constant: &chunk::Value) {
         if let chunk::Value::String(string) = constant {
-            self.strings.insert(Rc::clone(&string));
+            self.strings.insert(Rc::clone(string));
         }
         self.stack.push(constant.clone());
     }
@@ -148,7 +148,8 @@ impl VM {
         let b = self.stack.pop();
         match (b, a) {
             (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
-                Ok(self.stack.push(chunk::Value::Number(op(i, j))))
+                self.stack.push(chunk::Value::Number(op(i, j)));
+                Ok(())
             }
             _ => self.runtime_error(
                 chunk,
@@ -171,7 +172,8 @@ impl VM {
                         item
                     }
                 };
-                Ok(self.stack.push(chunk::Value::String(new)))
+                self.stack.push(chunk::Value::String(new));
+                Ok(())
             }
             _ => self.runtime_error(
                 chunk,
