@@ -80,7 +80,7 @@ impl VM {
                 chunk::OpCode::True => self.stack.push(chunk::Value::Bool(true)),
                 chunk::OpCode::Not => {
                     if let Some(value) = self.stack.pop() {
-                        self.stack.push(chunk::Value::Bool(value.is_falsey()))
+                        self.stack.push(chunk::Value::Bool(value.is_falsey()));
                     } else {
                         return self
                             .runtime_error(chunk, "Missing value to perform not operation.");
@@ -98,7 +98,7 @@ impl VM {
                     let b = self.stack.pop();
                     match (b, a) {
                         (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
-                            self.stack.push(chunk::Value::Bool(i > j))
+                            self.stack.push(chunk::Value::Bool(i > j));
                         }
                         _ => self.runtime_error(
                             chunk,
@@ -111,7 +111,7 @@ impl VM {
                     let b = self.stack.pop();
                     match (b, a) {
                         (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
-                            self.stack.push(chunk::Value::Bool(i < j))
+                            self.stack.push(chunk::Value::Bool(i < j));
                         }
                         _ => self
                             .runtime_error(chunk, "Cannot compare less two non-number operands.")?,
@@ -163,14 +163,11 @@ impl VM {
         let b = self.stack.pop();
         match (b, a) {
             (Some(chunk::Value::String(prefix)), Some(chunk::Value::String(suffix))) => {
-                let string = format!("{}{}", prefix, suffix);
-                let new = match self.strings.get(&string[..]) {
-                    Some(item) => Rc::clone(item),
-                    None => {
-                        let item = Rc::from(&string[..]);
-                        self.strings.insert(Rc::clone(&item));
-                        item
-                    }
+                let string = format!("{prefix}{suffix}");
+                let new = if let Some(item) = self.strings.get(&string[..]) { Rc::clone(item) } else {
+                    let item = Rc::from(&string[..]);
+                    self.strings.insert(Rc::clone(&item));
+                    item
                 };
                 self.stack.push(chunk::Value::String(new));
                 Ok(())

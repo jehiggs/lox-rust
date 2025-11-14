@@ -362,14 +362,14 @@ impl<'a> Compiler<'a> {
     fn report_error(token: &scanner::Token<'a>, message: &'static str) -> Result<(), Error> {
         eprint!("[line {}] Error", token.line);
         match &token.token_type {
-            scanner::TokenType::Error(message) => eprintln!(" : {}", message),
-            other => eprintln!(" at {:?}: {}", other, message),
+            scanner::TokenType::Error(message) => eprintln!(" : {message}"),
+            other => eprintln!(" at {other:?}: {message}"),
         }
         Err(Error::CompileError(message))
     }
 
     fn error(message: &'static str) -> Error {
-        eprintln!("Parse error occurred: {}", message);
+        eprintln!("Parse error occurred: {message}");
         Error::CompileError(message)
     }
 }
