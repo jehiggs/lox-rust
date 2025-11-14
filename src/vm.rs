@@ -256,4 +256,12 @@ mod tests {
         let result = vm.interpret(source);
         assert_eq!(Ok(()), result);
     }
+
+    #[test]
+    fn print_statement() {
+        let source = "print 1 * 2;";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert_eq!(Ok(()), result);
+    }
 }
