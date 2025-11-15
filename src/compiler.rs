@@ -25,7 +25,7 @@ impl<'a> Compiler<'a> {
         }
         let mut result = Ok(());
         while self.peek().is_some() {
-            result = self.declaration();
+            result = result.and(self.declaration());
         }
 
         if self.scanner.next().is_some() {
@@ -991,6 +991,15 @@ mod tests {
                 chunk::Value::String(Rc::from(String::from("foo"))),
             ],
         );
+    }
+
+    #[test]
+    fn error_in_first_line() {
+        let source = "var;
+            var foo = 1;";
+        let compiler = Compiler::new(source);
+        let result = compiler.compile();
+        assert!(matches!(result, Err(Error::CompileError(_))));
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {
