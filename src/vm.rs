@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -6,13 +7,14 @@ use crate::compiler;
 use crate::error::Error;
 
 const STACK_SIZE: usize = 256;
-const STRING_TABLE_SIZE: usize = 10;
+const TABLE_SIZE: usize = 10;
 
 #[derive(Debug)]
 pub struct VM {
     ip: usize,
     stack: Vec<chunk::Value>,
     strings: HashSet<Rc<str>>,
+    globals: HashMap<Rc<str>, chunk::Value>,
 }
 
 impl VM {
@@ -20,7 +22,8 @@ impl VM {
         VM {
             ip: 0,
             stack: Vec::with_capacity(STACK_SIZE),
-            strings: HashSet::with_capacity(STRING_TABLE_SIZE),
+            strings: HashSet::with_capacity(TABLE_SIZE),
+            globals: HashMap::with_capacity(TABLE_SIZE),
         }
     }
 
@@ -64,13 +67,13 @@ impl VM {
                     if let Some(chunk::Value::Number(value)) = self.stack.pop() {
                         self.stack.push(chunk::Value::Number(-value));
                     } else {
-                        return self.runtime_error(chunk, "Tried to negate non-number value.");
+                        return Err(self.runtime_error(chunk, "Tried to negate non-number value."));
                     }
                 }
                 chunk::OpCode::Add => match self.peek(0) {
                     Some(chunk::Value::String(_)) => self.concatenate(chunk)?,
                     Some(chunk::Value::Number(_)) => self.binary_op(std::ops::Add::add, chunk)?,
-                    _ => self.runtime_error(chunk, "Tried to add two non-addable types")?,
+                    _ => Err(self.runtime_error(chunk, "Tried to add two non-addable types"))?,
                 },
                 chunk::OpCode::Divide => self.binary_op(std::ops::Div::div, chunk)?,
                 chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul, chunk)?,
@@ -82,16 +85,17 @@ impl VM {
                     if let Some(value) = self.stack.pop() {
                         self.stack.push(chunk::Value::Bool(value.is_falsey()));
                     } else {
-                        return self
-                            .runtime_error(chunk, "Missing value to perform not operation.");
+                        return Err(
+                            self.runtime_error(chunk, "Missing value to perform not operation.")
+                        );
                     }
                 }
                 chunk::OpCode::Equal => match (self.stack.pop(), self.stack.pop()) {
                     (Some(a), Some(b)) => self.stack.push(chunk::Value::Bool(a == b)),
-                    _ => self.runtime_error(
+                    _ => Err(self.runtime_error(
                         chunk,
                         "Missing values when trying to compare for equality.",
-                    )?,
+                    ))?,
                 },
                 chunk::OpCode::Greater => {
                     let a = self.stack.pop();
@@ -100,10 +104,10 @@ impl VM {
                         (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
                             self.stack.push(chunk::Value::Bool(i > j));
                         }
-                        _ => self.runtime_error(
+                        _ => Err(self.runtime_error(
                             chunk,
                             "Cannot compare greater two non-number operands.",
-                        )?,
+                        ))?,
                     }
                 }
                 chunk::OpCode::Less => {
@@ -113,8 +117,8 @@ impl VM {
                         (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
                             self.stack.push(chunk::Value::Bool(i < j));
                         }
-                        _ => self
-                            .runtime_error(chunk, "Cannot compare less two non-number operands.")?,
+                        _ => Err(self
+                            .runtime_error(chunk, "Cannot compare less two non-number operands."))?,
                     }
                 }
                 chunk::OpCode::Print => {
@@ -122,11 +126,21 @@ impl VM {
                     if let Some(value) = item {
                         println!("{value}");
                     } else {
-                        self.runtime_error(chunk, "Could not find a value to print.")?;
+                        Err(self.runtime_error(chunk, "Could not find a value to print."))?;
                     }
                 }
                 chunk::OpCode::Pop => {
                     self.stack.pop();
+                }
+                chunk::OpCode::DefineGlobal(index) => {
+                    if let chunk::Value::String(string) = chunk.read_constant(*index) {
+                        let value = self.stack.pop().ok_or_else(|| {
+                            self.runtime_error(chunk, "Missing value for global variable.")
+                        })?;
+                        self.globals.insert(Rc::clone(string), value);
+                    } else {
+                        Err(self.runtime_error(chunk, "Name of variable was not a string."))?;
+                    }
                 }
             }
         }
@@ -151,10 +165,10 @@ impl VM {
                 self.stack.push(chunk::Value::Number(op(i, j)));
                 Ok(())
             }
-            _ => self.runtime_error(
+            _ => Err(self.runtime_error(
                 chunk,
                 "Operands were missing or incorrect to binary operation.",
-            ),
+            )),
         }
     }
 
@@ -164,7 +178,9 @@ impl VM {
         match (b, a) {
             (Some(chunk::Value::String(prefix)), Some(chunk::Value::String(suffix))) => {
                 let string = format!("{prefix}{suffix}");
-                let new = if let Some(item) = self.strings.get(&string[..]) { Rc::clone(item) } else {
+                let new = if let Some(item) = self.strings.get(&string[..]) {
+                    Rc::clone(item)
+                } else {
                     let item = Rc::from(&string[..]);
                     self.strings.insert(Rc::clone(&item));
                     item
@@ -172,10 +188,10 @@ impl VM {
                 self.stack.push(chunk::Value::String(new));
                 Ok(())
             }
-            _ => self.runtime_error(
+            _ => Err(self.runtime_error(
                 chunk,
                 "Operand was missing or incorrect in string concatenation.",
-            ),
+            )),
         }
     }
 
@@ -185,13 +201,13 @@ impl VM {
         chunk.disassemble_instruction(self.ip, instruction);
     }
 
-    fn runtime_error(&self, chunk: &chunk::Chunk, message: &'static str) -> Result<(), Error> {
+    fn runtime_error(&self, chunk: &chunk::Chunk, message: &'static str) -> Error {
         eprintln!(
             "[Line {}] Error in script: {}",
             chunk.get_line(self.ip),
             message
         );
-        Err(Error::RuntimeError(message))
+        Error::RuntimeError(message)
     }
 }
 

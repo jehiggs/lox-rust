@@ -35,6 +35,7 @@ pub enum OpCode {
     Add,
     Constant(u8),
     ConstantLong(usize),
+    DefineGlobal(usize),
     Divide,
     Equal,
     False,
@@ -79,12 +80,16 @@ impl Chunk {
         }
     }
 
-    pub fn write_constant(&mut self, constant: Value, line: usize) {
-        self.constants.push(constant);
-        let index = self.constants.len() - 1;
+    pub fn write_constant_instruction(&mut self, constant: Value, line: usize) {
+        let index = self.write_constant(constant);
         let byte =
             u8::try_from(index).map_or_else(|_| OpCode::ConstantLong(index), OpCode::Constant);
         self.write_chunk(byte, line);
+    }
+
+    pub fn write_constant(&mut self, constant: Value) -> usize {
+        self.constants.push(constant);
+        self.constants.len() - 1
     }
 
     pub fn read_code(&self, index: usize) -> &OpCode {
@@ -160,6 +165,14 @@ impl Chunk {
             OpCode::Less => println!("Less"),
             OpCode::Print => println!("Print"),
             OpCode::Pop => println!("Pop"),
+            OpCode::DefineGlobal(index) => {
+                let constant = self.constants.get(*index);
+                if let Some(value) = constant {
+                    println!("{:<16} {:04} {}", "DefineGlobal", index, value);
+                } else {
+                    println!("{:<16} {:04} !!No Value!!", "DefineGlobal", index);
+                }
+            }
         }
     }
 }
@@ -184,7 +197,7 @@ mod tests {
     #[test]
     fn add_constant() {
         let mut chunk = Chunk::new();
-        chunk.write_constant(Value::Number(45.0), 0);
+        chunk.write_constant_instruction(Value::Number(45.0), 0);
         let expected = Chunk {
             code: vec![OpCode::Constant(0)],
             constants: vec![Value::Number(45.0)],
@@ -198,16 +211,16 @@ mod tests {
         let mut chunk = Chunk::new();
         for i in 0..300 {
             let number = Value::Number(i.into());
-            chunk.write_constant(number, 0);
+            chunk.write_constant_instruction(number, 0);
         }
-        chunk.write_constant(Value::Number(123.into()), 0);
+        chunk.write_constant_instruction(Value::Number(123.into()), 0);
         assert_eq!(OpCode::ConstantLong(300), *chunk.code.last().unwrap());
     }
 
     #[test]
     fn write_single_constant() {
         let mut chunk = Chunk::new();
-        chunk.write_constant(Value::Number(1.2), 0);
+        chunk.write_constant_instruction(Value::Number(1.2), 0);
         let expected = Chunk {
             code: vec![OpCode::Constant(0)],
             constants: vec![Value::Number(1.2)],

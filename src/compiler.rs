@@ -72,7 +72,7 @@ impl<'a> Compiler<'a> {
                 self.advance();
                 Ok(())
             } else {
-                Self::report_error(token, message)
+                Err(Self::report_error(token, message))
             }
         } else {
             Err(Self::error(message))
@@ -104,7 +104,31 @@ impl<'a> Compiler<'a> {
     }
 
     fn declaration(&mut self) -> Result<(), Error> {
-        self.statement().inspect_err(|_| self.synchronize())?;
+        let result = match self.peek().map(|token| &token.token_type) {
+            Some(scanner::TokenType::Var) => self.var_declaration(),
+            _ => self.statement(),
+        };
+        result.inspect_err(|_| self.synchronize())
+    }
+
+    fn var_declaration(&mut self) -> Result<(), Error> {
+        let line = self
+            .peek()
+            .map(|token| token.line)
+            .ok_or_else(|| Self::error("Expected a token in a variable declaration."))?;
+        let global = self.parse_variable("Expected a variable name.")?; // TODO
+
+        if let Some(scanner::TokenType::Equal) = self.peek().map(|token| &token.token_type) {
+            self.expression()?;
+        } else {
+            self.chunk.write_chunk(chunk::OpCode::Nil, line);
+        }
+
+        self.consume(
+            mem::discriminant(&scanner::TokenType::Semicolon),
+            "Expect ';' after a variable declaration.",
+        )?;
+        self.define_variable(global, line);
         Ok(())
     }
 
@@ -154,10 +178,13 @@ impl<'a> Compiler<'a> {
         match token.token_type {
             scanner::TokenType::Number(value) => {
                 self.chunk
-                    .write_constant(chunk::Value::Number(value), token.line);
+                    .write_constant_instruction(chunk::Value::Number(value), token.line);
                 Ok(())
             }
-            _ => Self::report_error(&token, "Non-number token cannot be parsed as number."),
+            _ => Err(Self::report_error(
+                &token,
+                "Non-number token cannot be parsed as number.",
+            )),
         }
     }
 
@@ -189,7 +216,7 @@ impl<'a> Compiler<'a> {
                 self.chunk.write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
-            _ => Self::report_error(&token, "Non-unary operation found."),
+            _ => Err(Self::report_error(&token, "Non-unary operation found.")),
         }
     }
 
@@ -245,7 +272,10 @@ impl<'a> Compiler<'a> {
                 self.chunk.write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
-            _ => Self::report_error(&token, "Binary operation expected but not found."),
+            _ => Err(Self::report_error(
+                &token,
+                "Binary operation expected but not found.",
+            )),
         }
     }
 
@@ -266,7 +296,10 @@ impl<'a> Compiler<'a> {
                 self.chunk.write_chunk(chunk::OpCode::Nil, token.line);
                 Ok(())
             }
-            _ => Self::report_error(&token, "Did not get a literal token when parsing literal."),
+            _ => Err(Self::report_error(
+                &token,
+                "Did not get a literal token when parsing literal.",
+            )),
         }
     }
 
@@ -277,10 +310,13 @@ impl<'a> Compiler<'a> {
         match token.token_type {
             scanner::TokenType::String(string) => {
                 self.chunk
-                    .write_constant(chunk::Value::String(Rc::from(string)), token.line);
+                    .write_constant_instruction(chunk::Value::String(Rc::from(string)), token.line);
                 Ok(())
             }
-            _ => Self::report_error(&token, "Did not get a string token when parsing a string."),
+            _ => Err(Self::report_error(
+                &token,
+                "Did not get a string token when parsing a string.",
+            )),
         }
     }
 
@@ -302,6 +338,28 @@ impl<'a> Compiler<'a> {
             }
         }
         Ok(())
+    }
+
+    fn parse_variable(&mut self, error_message: &'static str) -> Result<usize, Error> {
+        if let Some(current) = self.peek() {
+            match current.token_type {
+                scanner::TokenType::Identifier(ident) => {
+                    let index = self
+                        .chunk
+                        .write_constant(chunk::Value::String(Rc::from(ident)));
+                    self.advance();
+                    Ok(index)
+                }
+                _ => Err(Self::report_error(current, error_message)),
+            }
+        } else {
+            Err(Self::error("No token found when parsing a variable."))
+        }
+    }
+
+    fn define_variable(&mut self, index: usize, line: usize) {
+        self.chunk
+            .write_chunk(chunk::OpCode::DefineGlobal(index), line);
     }
 
     #[allow(clippy::match_same_arms)]
@@ -385,13 +443,13 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn report_error(token: &scanner::Token<'a>, message: &'static str) -> Result<(), Error> {
+    fn report_error(token: &scanner::Token<'a>, message: &'static str) -> Error {
         eprint!("[line {}] Error", token.line);
         match &token.token_type {
             scanner::TokenType::Error(message) => eprintln!(" : {message}"),
             other => eprintln!(" at {other:?}: {message}"),
         }
-        Err(Error::CompileError(message))
+        Error::CompileError(message)
     }
 
     fn error(message: &'static str) -> Error {
