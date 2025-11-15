@@ -288,4 +288,31 @@ mod tests {
         let result = vm.interpret(source);
         assert_eq!(Ok(()), result);
     }
+
+    #[test]
+    fn global_variable() {
+        let source = "var foo = 12;
+            print foo + 1;";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert_eq!(Ok(()), result);
+    }
+
+    #[test]
+    fn missing_declaration() {
+        let source = "print foo + 1;";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert!(matches!(result, Err(Error::RuntimeError(_))));
+    }
+
+    #[test]
+    fn redefine_global() {
+        let source = "var foo = 1;
+            var foo = 2;";
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        println!("{}", vm.globals);
+        assert_eq!(Ok(()), result);
+    }
 }

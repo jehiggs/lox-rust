@@ -889,6 +889,82 @@ mod tests {
         );
     }
 
+    #[test]
+    fn global_variable() {
+        let source = "var foo = 12;
+            print foo;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(1),
+                OpCode::DefineGlobal(0),
+                OpCode::GetGlobal(2),
+                OpCode::Print,
+            ],
+            &[
+                chunk::Value::String(Rc::from(String::from("foo"))),
+                chunk::Value::Number(12.),
+                chunk::Value::String(Rc::from(String::from("foo"))),
+            ],
+        );
+    }
+
+    #[test]
+    fn uninitialized_global() {
+        let source = "var foo;
+            print foo;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Nil,
+                OpCode::DefineGlobal(0),
+                OpCode::GetGlobal(1),
+                OpCode::Print,
+            ],
+            &[
+                chunk::Value::String(Rc::from(String::from("foo"))),
+                chunk::Value::String(Rc::from(String::from("foo"))),
+            ],
+        );
+    }
+
+    #[test]
+    fn dangling_var() {
+        let source = "var;";
+        let compiler = Compiler::new(source);
+        let output = compiler.compile();
+        assert!(matches!(output, Err(Error::CompileError(_))));
+    }
+
+    #[test]
+    fn variable_in_statement() {
+        let source = "var foo = 1;
+            print 1 + foo;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(1),
+                OpCode::DefineGlobal(0),
+                OpCode::Constant(2),
+                OpCode::GetGlobal(3),
+                OpCode::Add,
+                OpCode::Print,
+            ],
+            &[
+                chunk::Value::String(Rc::from(String::from("foo"))),
+                chunk::Value::Number(1.),
+                chunk::Value::Number(1.),
+                chunk::Value::String(Rc::from(String::from("foo"))),
+            ],
+        );
+    }
+
     fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {
         for (index, opcode) in opcodes.iter().enumerate() {
             assert_eq!(opcode, chunk.read_code(index));
