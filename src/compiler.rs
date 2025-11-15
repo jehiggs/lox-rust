@@ -79,6 +79,19 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn match_token(&mut self, token_type: mem::Discriminant<scanner::TokenType<'a>>) -> bool {
+        if let Some(token) = self.peek() {
+            if mem::discriminant(&token.token_type) == token_type {
+                self.advance();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     fn synchronize(&mut self) {
         while let Some(token) = self.peek() {
             match token.token_type {
@@ -172,7 +185,7 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Assignment)
     }
 
-    fn number(&mut self) -> Result<(), Error> {
+    fn number(&mut self, _: bool) -> Result<(), Error> {
         let token = self
             .advance()
             .ok_or_else(|| Self::error("Missing required number token."))?;
@@ -189,7 +202,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn grouping(&mut self) -> Result<(), Error> {
+    fn grouping(&mut self, _: bool) -> Result<(), Error> {
         self.consume(
             mem::discriminant(&scanner::TokenType::LeftParen),
             "Called grouping with no left parenthesis.",
@@ -202,7 +215,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn unary(&mut self) -> Result<(), Error> {
+    fn unary(&mut self, _: bool) -> Result<(), Error> {
         let token = self
             .advance()
             .ok_or_else(|| Self::error("Missing required unary operation token."))?;
@@ -221,7 +234,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn binary(&mut self) -> Result<(), Error> {
+    fn binary(&mut self, _: bool) -> Result<(), Error> {
         let token = self
             .advance()
             .ok_or_else(|| Self::error("Missing required binary operation token."))?;
@@ -280,7 +293,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn literal(&mut self) -> Result<(), Error> {
+    fn literal(&mut self, _: bool) -> Result<(), Error> {
         let token = self
             .advance()
             .ok_or_else(|| Self::error("Missing reuqired literal token."))?;
@@ -304,7 +317,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn string(&mut self) -> Result<(), Error> {
+    fn string(&mut self, _: bool) -> Result<(), Error> {
         let token = self
             .advance()
             .ok_or_else(|| Self::error("Missing required string token."))?;
@@ -321,14 +334,18 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn variable(&mut self) -> Result<(), Error> {
+    fn variable(&mut self, can_assign: bool) -> Result<(), Error> {
         let token = self
             .advance()
             .ok_or_else(|| Self::error("Missing required variable token."))?;
-        self.named_variable(&token)
+        self.named_variable(&token, can_assign)
     }
 
-    fn named_variable(&mut self, token: &scanner::Token<'a>) -> Result<(), Error> {
+    fn named_variable(
+        &mut self,
+        token: &scanner::Token<'a>,
+        can_assign: bool,
+    ) -> Result<(), Error> {
         let index = match token.token_type {
             scanner::TokenType::Identifier(ident) => self
                 .chunk
@@ -338,8 +355,14 @@ impl<'a> Compiler<'a> {
                 "Did not get an identifier token when reading variable.",
             ))?,
         };
-        self.chunk
-            .write_chunk(chunk::OpCode::GetGlobal(index), token.line);
+        if can_assign && self.match_token(mem::discriminant(&scanner::TokenType::Equal)) {
+            self.expression()?;
+            self.chunk
+                .write_chunk(chunk::OpCode::SetGlobal(index), token.line);
+        } else {
+            self.chunk
+                .write_chunk(chunk::OpCode::GetGlobal(index), token.line);
+        }
         Ok(())
     }
 
@@ -349,15 +372,20 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| Self::error("Required more tokens to parse rule."))?;
         let parse_rule = Self::get_rule(&current.token_type);
 
+        let can_assign = parse_rule.precedence <= Precedence::Assignment;
         if let Some(prefix_fn) = parse_rule.prefix_fn {
-            prefix_fn(self)?;
+            prefix_fn(self, can_assign)?;
         }
 
         while let Some(rule) = self.peek().map(|token| Self::get_rule(&token.token_type))
             && precedence <= rule.precedence
         {
             if let Some(infix_fn) = rule.infix_fn {
-                infix_fn(self)?;
+                infix_fn(self, can_assign)?;
+            }
+
+            if can_assign && self.match_token(mem::discriminant(&scanner::TokenType::Equal)) {
+                Err(Self::error("Invalid assignment target"))?;
             }
         }
         Ok(())
@@ -514,7 +542,7 @@ impl Precedence {
     }
 }
 
-type ParseFn<'a> = fn(&mut Compiler<'a>) -> Result<(), Error>;
+type ParseFn<'a> = fn(&mut Compiler<'a>, bool) -> Result<(), Error>;
 
 struct ParseTableEntry<'a> {
     prefix_fn: Option<ParseFn<'a>>,

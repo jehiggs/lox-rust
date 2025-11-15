@@ -149,6 +149,27 @@ impl VM {
                             self.runtime_error(chunk, "Could not read value for global variable.")
                         })?;
                         self.stack.push(value.clone());
+                    } else {
+                        Err(self.runtime_error(chunk, "Name of variable was not a string"))?;
+                    }
+                }
+                chunk::OpCode::SetGlobal(index) => {
+                    if let chunk::Value::String(string) = chunk.read_constant(*index) {
+                        let next = self.peek(0);
+                        let value = match next {
+                            Some(value) => value.clone(),
+                            None => {
+                                Err(self.runtime_error(chunk, "No value to set for variable."))?
+                            }
+                        };
+                        let previous = self.globals.insert(Rc::clone(string), value);
+                        if previous.is_none() {
+                            self.globals.remove(string);
+                            Err(self
+                                .runtime_error(chunk, "Cannot assign to an undefined variable."))?;
+                        }
+                    } else {
+                        Err(self.runtime_error(chunk, "Name of variable was not a string"))?;
                     }
                 }
             }

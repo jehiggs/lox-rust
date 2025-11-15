@@ -49,6 +49,7 @@ pub enum OpCode {
     Pop,
     Print,
     Return,
+    SetGlobal(usize),
     Subtract,
     True,
 }
@@ -157,6 +158,7 @@ impl Chunk {
             OpCode::Pop => println!("Pop"),
             OpCode::DefineGlobal(index) => self.print_constant("DefineGlobal", *index),
             OpCode::GetGlobal(index) => self.print_constant("GetGlobal", *index),
+            OpCode::SetGlobal(index) => self.print_constant("SetGlobal", *index),
         }
     }
 
