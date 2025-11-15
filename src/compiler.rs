@@ -1002,6 +1002,37 @@ mod tests {
         assert!(matches!(result, Err(Error::CompileError(_))));
     }
 
+    #[test]
+    fn assignment() {
+        let source = "var foo;
+            foo = 1;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Nil,
+                OpCode::DefineGlobal(0),
+                OpCode::Constant(2),
+                OpCode::SetGlobal(1),
+                OpCode::Pop,
+            ],
+            &[
+                chunk::Value::String(Rc::from(String::from("foo"))),
+                chunk::Value::String(Rc::from(String::from("foo"))),
+                chunk::Value::Number(1.),
+            ],
+        );
+    }
+
+    #[test]
+    fn invalid_assignment_target() {
+        let source = "1 + 2 = 3 * 5;";
+        let compiler = Compiler::new(source);
+        let result = compiler.compile();
+        assert!(matches!(result, Err(Error::CompileError(_))));
+    }
+
     fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {
         for (index, opcode) in opcodes.iter().enumerate() {
             assert_eq!(opcode, chunk.read_code(index));

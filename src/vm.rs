@@ -249,90 +249,87 @@ mod tests {
     #[test]
     fn basic_arithmetic() {
         let source = "1 + 2;";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert_eq!(Ok(()), result);
+        test_valid(source);
     }
 
     #[test]
     fn negate_non_number() {
         let source = "-false;";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert!(matches!(result, Err(Error::RuntimeError(_))));
+        test_invalid(source);
     }
 
     #[test]
     fn compare_non_numbers() {
         let source = "false > true;";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert!(matches!(result, Err(Error::RuntimeError(_))));
+        test_invalid(source);
     }
 
     #[test]
     fn multiple_comparisons() {
         let source = "1 < 2 < 3;";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert!(matches!(result, Err(Error::RuntimeError(_))));
+        test_invalid(source);
     }
 
     #[test]
     fn string_concatenate() {
         let source = "\"foo\" + \"bar\";";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert_eq!(Ok(()), result);
+        test_valid(source);
     }
 
     #[test]
     fn addition_wrong_types() {
         let source = "1 + \"foo\";";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert!(matches!(result, Err(Error::RuntimeError(_))));
+        test_invalid(source);
     }
 
     #[test]
     fn string_equality() {
         let source = "\"foo\" == \"foo\";";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert_eq!(Ok(()), result);
+        test_valid(source);
     }
 
     #[test]
     fn print_statement() {
         let source = "print 1 * 2;";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert_eq!(Ok(()), result);
+        test_valid(source);
     }
 
     #[test]
     fn global_variable() {
         let source = "var foo = 12;
             print foo + 1;";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert_eq!(Ok(()), result);
+        test_valid(source);
     }
 
     #[test]
     fn missing_declaration() {
         let source = "print foo + 1;";
-        let mut vm = VM::new();
-        let result = vm.interpret(source);
-        assert!(matches!(result, Err(Error::RuntimeError(_))));
+        test_invalid(source);
     }
 
     #[test]
     fn redefine_global() {
         let source = "var foo = 1;
             var foo = 2;";
+        test_valid(source);
+    }
+
+    #[test]
+    fn assignment() {
+        let source = "var foo = 2;
+            foo = 3;";
+        test_valid(source);
+    }
+
+    fn test_valid(source: &str) {
         let mut vm = VM::new();
         let result = vm.interpret(source);
         assert_eq!(Ok(()), result);
+    }
+
+    fn test_invalid(source: &str) {
+        let mut vm = VM::new();
+        let result = vm.interpret(source);
+        assert!(matches!(result, Err(Error::RuntimeError(_))));
     }
 }
