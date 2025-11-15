@@ -312,7 +312,6 @@ mod tests {
             var foo = 2;";
         let mut vm = VM::new();
         let result = vm.interpret(source);
-        println!("{}", vm.globals);
         assert_eq!(Ok(()), result);
     }
 }
