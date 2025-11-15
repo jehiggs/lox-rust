@@ -113,12 +113,13 @@ impl<'a> Compiler<'a> {
 
     fn var_declaration(&mut self) -> Result<(), Error> {
         let line = self
-            .peek()
+            .advance()
             .map(|token| token.line)
             .ok_or_else(|| Self::error("Expected a token in a variable declaration."))?;
-        let global = self.parse_variable("Expected a variable name.")?; // TODO
+        let global = self.parse_variable("Expected a variable name.")?;
 
         if let Some(scanner::TokenType::Equal) = self.peek().map(|token| &token.token_type) {
+            _ = self.advance();
             self.expression()?;
         } else {
             self.chunk.write_chunk(chunk::OpCode::Nil, line);
@@ -320,6 +321,28 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn variable(&mut self) -> Result<(), Error> {
+        let token = self
+            .advance()
+            .ok_or_else(|| Self::error("Missing required variable token."))?;
+        self.named_variable(&token)
+    }
+
+    fn named_variable(&mut self, token: &scanner::Token<'a>) -> Result<(), Error> {
+        let index = match token.token_type {
+            scanner::TokenType::Identifier(ident) => self
+                .chunk
+                .write_constant(chunk::Value::String(Rc::from(ident))),
+            _ => Err(Self::report_error(
+                token,
+                "Did not get an identifier token when reading variable.",
+            ))?,
+        };
+        self.chunk
+            .write_chunk(chunk::OpCode::GetGlobal(index), token.line);
+        Ok(())
+    }
+
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {
         let current = self
             .peek()
@@ -341,16 +364,15 @@ impl<'a> Compiler<'a> {
     }
 
     fn parse_variable(&mut self, error_message: &'static str) -> Result<usize, Error> {
-        if let Some(current) = self.peek() {
+        if let Some(current) = self.advance() {
             match current.token_type {
                 scanner::TokenType::Identifier(ident) => {
                     let index = self
                         .chunk
                         .write_constant(chunk::Value::String(Rc::from(ident)));
-                    self.advance();
                     Ok(index)
                 }
-                _ => Err(Self::report_error(current, error_message)),
+                _ => Err(Self::report_error(&current, error_message)),
             }
         } else {
             Err(Self::error("No token found when parsing a variable."))
@@ -410,7 +432,9 @@ impl<'a> Compiler<'a> {
             scanner::TokenType::LessEqual => {
                 ParseTableEntry::new(None, Some(Self::binary), Precedence::Comparison)
             }
-            scanner::TokenType::Identifier(_) => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Identifier(_) => {
+                ParseTableEntry::new(Some(Self::variable), None, Precedence::None)
+            }
             scanner::TokenType::String(_) => {
                 ParseTableEntry::new(Some(Self::string), None, Precedence::None)
             }

@@ -39,6 +39,7 @@ pub enum OpCode {
     Divide,
     Equal,
     False,
+    GetGlobal(usize),
     Greater,
     Less,
     Multiply,
@@ -102,10 +103,11 @@ impl Chunk {
 
     #[cfg(debug_assertions)]
     pub fn disassemble_chunk(&self, name: &str) {
-        println!("== {name} ==");
+        println!("== START CHUNK {name} ==");
         for (i, code) in self.code.iter().enumerate() {
             self.disassemble_instruction(i, code);
         }
+        println!("== END CHUNK ==\n\n");
     }
 
     #[cfg(debug_assertions)]
@@ -135,21 +137,9 @@ impl Chunk {
     fn print_code(&self, code: &OpCode) {
         match code {
             OpCode::Constant(const_index) => {
-                let constant = self.constants.get(usize::from(*const_index));
-                if let Some(value) = constant {
-                    println!("{:<16} {:04} {}", "Constant", const_index, value);
-                } else {
-                    println!("{:<16} {:04} !!No Value!!", "Constant", const_index);
-                }
+                self.print_constant("Constant", usize::from(*const_index));
             }
-            OpCode::ConstantLong(const_index) => {
-                let constant = self.constants.get(*const_index);
-                if let Some(value) = constant {
-                    println!("{:<16} {:04} {}", "ConstantLong", const_index, value);
-                } else {
-                    println!("{:<16} {:04} !!No Value!!", "ConstantLong", const_index);
-                }
-            }
+            OpCode::ConstantLong(const_index) => self.print_constant("ConstantLong", *const_index),
             OpCode::Return => println!("Return"),
             OpCode::Negate => println!("Negate"),
             OpCode::Add => println!("Add"),
@@ -165,14 +155,18 @@ impl Chunk {
             OpCode::Less => println!("Less"),
             OpCode::Print => println!("Print"),
             OpCode::Pop => println!("Pop"),
-            OpCode::DefineGlobal(index) => {
-                let constant = self.constants.get(*index);
-                if let Some(value) = constant {
-                    println!("{:<16} {:04} {}", "DefineGlobal", index, value);
-                } else {
-                    println!("{:<16} {:04} !!No Value!!", "DefineGlobal", index);
-                }
-            }
+            OpCode::DefineGlobal(index) => self.print_constant("DefineGlobal", *index),
+            OpCode::GetGlobal(index) => self.print_constant("GetGlobal", *index),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn print_constant(&self, name: &str, index: usize) {
+        let constant = self.constants.get(index);
+        if let Some(value) = constant {
+            println!("{name:<16} {index:04} {value}");
+        } else {
+            println!("{name:<16} {index:04} !!No Value!!");
         }
     }
 }
