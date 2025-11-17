@@ -1182,6 +1182,80 @@ mod tests {
         assert!(matches!(result, Err(Error::CompileError(_))));
     }
 
+    #[test]
+    fn define_local_variable() {
+        let source = "{ var a = 10; print a; }";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(0),
+                OpCode::GetLocal(0),
+                OpCode::Print,
+                OpCode::Pop,
+            ],
+            &[chunk::Value::Number(10.)],
+        );
+    }
+
+    #[test]
+    fn get_local_variable() {
+        let source = "{ var a = 10; a = 20; print a;}";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::SetLocal(0),
+                OpCode::Pop,
+                OpCode::GetLocal(0),
+                OpCode::Print,
+                OpCode::Pop,
+            ],
+            &[chunk::Value::Number(10.), chunk::Value::Number(20.)],
+        );
+    }
+
+    #[test]
+    fn shadowed_variable() {
+        let source = "{ var a = 10; { var a = 20; print a; } print a; }";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(0),
+                OpCode::Constant(1),
+                OpCode::GetLocal(1),
+                OpCode::Print,
+                OpCode::Pop,
+                OpCode::GetLocal(0),
+                OpCode::Print,
+                OpCode::Pop,
+            ],
+            &[chunk::Value::Number(10.), chunk::Value::Number(20.)],
+        );
+    }
+
+    #[test]
+    fn redeclared_variable() {
+        let source = "{ var a = 20; var a = 30; }";
+        let compiler = Compiler::new(source);
+        let result = compiler.compile();
+        assert!(matches!(result, Err(Error::CompileError(_))));
+    }
+
+    #[test]
+    fn variable_use_in_initialization() {
+        let source = "{ var a = a + 20; }";
+        let compiler = Compiler::new(source);
+        let result = compiler.compile();
+        assert!(matches!(result, Err(Error::CompileError(_))));
+    }
+
     fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {
         for (index, opcode) in opcodes.iter().enumerate() {
             assert_eq!(opcode, chunk.read_code(index));

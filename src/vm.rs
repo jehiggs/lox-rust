@@ -338,6 +338,12 @@ mod tests {
         test_valid(source);
     }
 
+    #[test]
+    fn variable_in_wrong_scope() {
+        let source = "{ var a = 10; { var b = 20; } print b; }";
+        test_invalid(source);
+    }
+
     fn test_valid(source: &str) {
         let mut vm = VM::new();
         let result = vm.interpret(source);
