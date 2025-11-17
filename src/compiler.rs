@@ -6,9 +6,14 @@ use std::iter;
 use std::mem;
 use std::rc::Rc;
 
+const LOCAL_SIZE: usize = 255;
+
 pub struct Compiler<'a> {
     scanner: iter::Peekable<scanner::Scanner<'a>>,
     chunk: chunk::Chunk,
+    locals: [Option<Local<'a>>; LOCAL_SIZE],
+    local_count: usize,
+    scope_depth: usize,
 }
 
 impl<'a> Compiler<'a> {
@@ -16,6 +21,9 @@ impl<'a> Compiler<'a> {
         Compiler {
             scanner: scanner::Scanner::new(source).peekable(),
             chunk: chunk::Chunk::new(),
+            locals: [const { None }; LOCAL_SIZE],
+            local_count: 0,
+            scope_depth: 0,
         }
     }
 
@@ -149,7 +157,32 @@ impl<'a> Compiler<'a> {
     fn statement(&mut self) -> Result<(), Error> {
         match self.peek().map(|token| &token.token_type) {
             Some(scanner::TokenType::Print) => self.print_statement(),
+            Some(scanner::TokenType::LeftBrace) => {
+                self.begin_scope();
+                let result = self.block();
+                let line = self.peek().map_or(0, |token| token.line);
+                self.end_scope(line);
+                result
+            }
             _ => self.expression_statement(),
+        }
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self, line: usize) {
+        self.scope_depth -= 1;
+        for item in self.locals[0..self.local_count].iter_mut().rev() {
+            match item {
+                Some(local) if local.depth > self.scope_depth => {
+                    *item = None;
+                    self.local_count -= 1;
+                    self.chunk.write_chunk(chunk::OpCode::Pop, line);
+                }
+                Some(_) | None => break,
+            }
         }
     }
 
@@ -183,6 +216,24 @@ impl<'a> Compiler<'a> {
 
     fn expression(&mut self) -> Result<(), Error> {
         self.parse_precedence(Precedence::Assignment)
+    }
+
+    fn block(&mut self) -> Result<(), Error> {
+        self.consume(
+            mem::discriminant(&scanner::TokenType::LeftBrace),
+            "Did not get left brace before block.",
+        )?;
+        while let Some(token) = self.peek() {
+            match token.token_type {
+                scanner::TokenType::RightBrace => {
+                    self.advance();
+                    return Ok(());
+                }
+                _ => self.declaration()?,
+            }
+        }
+
+        Err(Self::error("Expect '}' at end of block."))
     }
 
     fn number(&mut self, _: bool) -> Result<(), Error> {
@@ -395,10 +446,15 @@ impl<'a> Compiler<'a> {
         if let Some(current) = self.advance() {
             match current.token_type {
                 scanner::TokenType::Identifier(ident) => {
-                    let index = self
-                        .chunk
-                        .write_constant(chunk::Value::String(Rc::from(ident)));
-                    Ok(index)
+                    if self.scope_depth > 0 {
+                        self.declare_variable(current)?;
+                        Ok(0)
+                    } else {
+                        let index = self
+                            .chunk
+                            .write_constant(chunk::Value::String(Rc::from(ident)));
+                        Ok(index)
+                    }
                 }
                 _ => Err(Self::report_error(&current, error_message)),
             }
@@ -407,7 +463,47 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn declare_variable(&mut self, token: scanner::Token<'a>) -> Result<(), Error> {
+        if self.scope_depth == 0 {
+            return Ok(());
+        }
+        if self.local_count >= LOCAL_SIZE {
+            return Err(Self::report_error(
+                &token,
+                "Could not declare variable due to insufficient size.",
+            ));
+        }
+        if let scanner::TokenType::Identifier(_) = token.token_type {
+            for item in self.locals[0..self.local_count].iter().rev() {
+                match item {
+                    Some(local) if local.depth < self.scope_depth => break,
+                    Some(local) => {
+                        if local.name == token {
+                            Err(Self::report_error(
+                                &token,
+                                "Attempted to redeclare a variable in the same scope.",
+                            ))?;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            let local = Local::new(self.scope_depth, token);
+            self.locals[self.local_count] = Some(local);
+            self.local_count += 1;
+            Ok(())
+        } else {
+            Err(Self::report_error(
+                &token,
+                "Received non-identifier for declaring a variable.",
+            ))
+        }
+    }
+
     fn define_variable(&mut self, index: usize, line: usize) {
+        if self.scope_depth > 0 {
+            return;
+        }
         self.chunk
             .write_chunk(chunk::OpCode::DefineGlobal(index), line);
     }
@@ -561,6 +657,17 @@ impl<'a> ParseTableEntry<'a> {
             infix_fn,
             precedence,
         }
+    }
+}
+
+struct Local<'a> {
+    depth: usize,
+    name: scanner::Token<'a>,
+}
+
+impl<'a> Local<'a> {
+    fn new(depth: usize, name: scanner::Token<'a>) -> Self {
+        Local { depth, name }
     }
 }
 
