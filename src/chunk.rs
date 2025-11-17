@@ -200,7 +200,7 @@ impl Chunk {
     #[cfg(debug_assertions)]
     fn print_jump(name: &str, jump: usize, index: usize, add: bool) {
         let target = if add { jump + index } else { index - jump };
-        println!("{name:<16} {index:<4} {target:<4}");
+        println!("{name:<16} {index:04}->{target:<4}");
     }
 }
 

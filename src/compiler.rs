@@ -253,14 +253,18 @@ impl<'a> Compiler<'a> {
     }
 
     fn patch_jump(&mut self, offset: usize) -> Result<(), Error> {
-        let code_to_jump = self.chunk.code_len() - offset;
+        let code_to_jump = self.chunk.code_len() - offset - 1;
         let code = self.chunk.patch_code(offset);
         match code {
             chunk::OpCode::JumpIfFalse(_) => {
                 *code = chunk::OpCode::JumpIfFalse(code_to_jump);
                 Ok(())
             }
-            _ => Err(Self::error("Tried to path a non-jump instruction.")),
+            chunk::OpCode::Jump(_) => {
+                *code = chunk::OpCode::Jump(code_to_jump);
+                Ok(())
+            }
+            _ => Err(Self::error("Tried to patch a non-jump instruction.")),
         }
     }
 
