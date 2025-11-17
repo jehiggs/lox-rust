@@ -74,11 +74,12 @@ impl<'a> Compiler<'a> {
         &mut self,
         token_type: mem::Discriminant<scanner::TokenType<'a>>,
         message: &'static str,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
         if let Some(token) = self.peek() {
             if mem::discriminant(&token.token_type) == token_type {
+                let line = token.line;
                 self.advance();
-                Ok(())
+                Ok(line)
             } else {
                 Err(Self::report_error(token, message))
             }
@@ -216,7 +217,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn if_statement(&mut self) -> Result<(), Error> {
-        self.consume(
+        let if_line = self.consume(
             mem::discriminant(&scanner::TokenType::If),
             "Require an if token to parse an if statement.",
         )?;
@@ -230,9 +231,20 @@ impl<'a> Compiler<'a> {
             "Expect ')' after if condition.",
         )?;
 
-        let jump_offset = self.emit_jump(chunk::OpCode::JumpIfFalse(0), 0); // TODO
+        let then_jump_offset = self.emit_jump(chunk::OpCode::JumpIfFalse(0), if_line);
+        self.chunk.write_chunk(chunk::OpCode::Pop, if_line);
         self.statement()?;
-        self.patch_jump(jump_offset) // TODO
+        let next_line = self
+            .peek()
+            .map(|token| token.line)
+            .ok_or_else(|| Self::error("Expected a token in an if statement."))?;
+        let else_jump_offset = self.emit_jump(chunk::OpCode::Jump(0), next_line);
+        self.patch_jump(then_jump_offset)?;
+        self.chunk.write_chunk(chunk::OpCode::Pop, next_line);
+        if self.match_token(mem::discriminant(&scanner::TokenType::Else)) {
+            self.statement()?;
+        }
+        self.patch_jump(else_jump_offset)
     }
 
     fn emit_jump(&mut self, instruction: chunk::OpCode, line: usize) -> usize {

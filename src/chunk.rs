@@ -42,6 +42,7 @@ pub enum OpCode {
     GetGlobal(usize),
     GetLocal(usize),
     Greater,
+    Jump(usize),
     JumpIfFalse(usize),
     Less,
     Multiply,
@@ -174,6 +175,9 @@ impl Chunk {
             OpCode::SetLocal(const_index) => Self::print_local("SetLocal", *const_index),
             OpCode::JumpIfFalse(jump_size) => {
                 Self::print_jump("JumpIfFalse", *jump_size, index, true);
+            }
+            OpCode::Jump(jump_size) => {
+                Self::print_jump("Jump", *jump_size, index, true);
             }
         }
     }

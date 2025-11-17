@@ -199,6 +199,9 @@ impl VM {
                         Err(self.runtime_error(chunk, "No value found in stack for if condition."))?;
                     }
                 }
+                chunk::OpCode::Jump(jump_size) => {
+                    self.ip += jump_size;
+                }
             }
         }
     }
