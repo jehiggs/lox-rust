@@ -172,6 +172,23 @@ impl VM {
                         Err(self.runtime_error(chunk, "Name of variable was not a string"))?;
                     }
                 }
+                chunk::OpCode::GetLocal(index) => {
+                    let val = self.stack.get(*index).ok_or_else(|| {
+                        self.runtime_error(chunk, "No value found in stack for local variable.")
+                    })?;
+                    self.stack.push(val.clone());
+                }
+                chunk::OpCode::SetLocal(index) => {
+                    let val = self.peek(0);
+                    let value = match val {
+                        Some(value) => value.clone(),
+                        None => Err(self.runtime_error(
+                            chunk,
+                            "No value found in stack to set local variable to.",
+                        ))?,
+                    };
+                    self.stack[*index] = value;
+                }
             }
         }
     }

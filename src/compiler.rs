@@ -176,7 +176,7 @@ impl<'a> Compiler<'a> {
         self.scope_depth -= 1;
         for item in self.locals[0..self.local_count].iter_mut().rev() {
             match item {
-                Some(local) if local.depth > self.scope_depth => {
+                Some(Local::Initialized(depth, _)) if *depth > self.scope_depth => {
                     *item = None;
                     self.local_count -= 1;
                     self.chunk.write_chunk(chunk::OpCode::Pop, line);
@@ -397,24 +397,50 @@ impl<'a> Compiler<'a> {
         token: &scanner::Token<'a>,
         can_assign: bool,
     ) -> Result<(), Error> {
-        let index = match token.token_type {
-            scanner::TokenType::Identifier(ident) => self
-                .chunk
-                .write_constant(chunk::Value::String(Rc::from(ident))),
+        let ident = match token.token_type {
+            scanner::TokenType::Identifier(ident) => ident,
             _ => Err(Self::report_error(
                 token,
-                "Did not get an identifier token when reading variable.",
+                "Did not get identifier when reading variable.",
             ))?,
+        };
+        let (get_op, set_op) = if let Some(index) = self.resolve_local(token)? {
+            (
+                chunk::OpCode::GetLocal(index),
+                chunk::OpCode::SetLocal(index),
+            )
+        } else {
+            let index = self
+                .chunk
+                .write_constant(chunk::Value::String(Rc::from(ident)));
+            (
+                chunk::OpCode::GetGlobal(index),
+                chunk::OpCode::SetGlobal(index),
+            )
         };
         if can_assign && self.match_token(mem::discriminant(&scanner::TokenType::Equal)) {
             self.expression()?;
-            self.chunk
-                .write_chunk(chunk::OpCode::SetGlobal(index), token.line);
+            self.chunk.write_chunk(set_op, token.line);
         } else {
-            self.chunk
-                .write_chunk(chunk::OpCode::GetGlobal(index), token.line);
+            self.chunk.write_chunk(get_op, token.line);
         }
         Ok(())
+    }
+
+    fn resolve_local(&mut self, token: &scanner::Token<'a>) -> Result<Option<usize>, Error> {
+        for (index, item) in self.locals[0..self.local_count].iter().enumerate().rev() {
+            if let Some(local) = item
+                && *local.name() == *token
+            {
+                match local {
+                    Local::Initialized(_, _) => return Ok(Some(index)),
+                    Local::Uninitialized(_) => {
+                        return Err(Self::error("Can't read variable in its own initializer."));
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {
@@ -476,9 +502,9 @@ impl<'a> Compiler<'a> {
         if let scanner::TokenType::Identifier(_) = token.token_type {
             for item in self.locals[0..self.local_count].iter().rev() {
                 match item {
-                    Some(local) if local.depth < self.scope_depth => break,
+                    Some(Local::Initialized(depth, _)) if *depth < self.scope_depth => break,
                     Some(local) => {
-                        if local.name == token {
+                        if *local.name() == token {
                             Err(Self::report_error(
                                 &token,
                                 "Attempted to redeclare a variable in the same scope.",
@@ -488,7 +514,7 @@ impl<'a> Compiler<'a> {
                     None => break,
                 }
             }
-            let local = Local::new(self.scope_depth, token);
+            let local = Local::new(token);
             self.locals[self.local_count] = Some(local);
             self.local_count += 1;
             Ok(())
@@ -502,6 +528,9 @@ impl<'a> Compiler<'a> {
 
     fn define_variable(&mut self, index: usize, line: usize) {
         if self.scope_depth > 0 {
+            if let Some(local) = self.locals[self.local_count - 1].take() {
+                self.locals[self.local_count - 1] = Some(local.initialize(self.scope_depth));
+            }
             return;
         }
         self.chunk
@@ -660,14 +689,27 @@ impl<'a> ParseTableEntry<'a> {
     }
 }
 
-struct Local<'a> {
-    depth: usize,
-    name: scanner::Token<'a>,
+enum Local<'a> {
+    Initialized(usize, scanner::Token<'a>),
+    Uninitialized(scanner::Token<'a>),
 }
 
 impl<'a> Local<'a> {
-    fn new(depth: usize, name: scanner::Token<'a>) -> Self {
-        Local { depth, name }
+    fn new(name: scanner::Token<'a>) -> Self {
+        Self::Uninitialized(name)
+    }
+
+    fn initialize(self, depth: usize) -> Self {
+        match self {
+            Self::Uninitialized(name) => Self::Initialized(depth, name),
+            Self::Initialized(_, _) => self,
+        }
+    }
+
+    fn name(&self) -> &scanner::Token<'a> {
+        match self {
+            Self::Uninitialized(name) | Self::Initialized(_, name) => name,
+        }
     }
 }
 

@@ -40,6 +40,7 @@ pub enum OpCode {
     Equal,
     False,
     GetGlobal(usize),
+    GetLocal(usize),
     Greater,
     Less,
     Multiply,
@@ -50,6 +51,7 @@ pub enum OpCode {
     Print,
     Return,
     SetGlobal(usize),
+    SetLocal(usize),
     Subtract,
     True,
 }
@@ -159,6 +161,8 @@ impl Chunk {
             OpCode::DefineGlobal(index) => self.print_constant("DefineGlobal", *index),
             OpCode::GetGlobal(index) => self.print_constant("GetGlobal", *index),
             OpCode::SetGlobal(index) => self.print_constant("SetGlobal", *index),
+            OpCode::GetLocal(index) => Self::print_local("GetLocal", *index),
+            OpCode::SetLocal(index) => Self::print_local("SetLocal", *index),
         }
     }
 
@@ -170,6 +174,11 @@ impl Chunk {
         } else {
             println!("{name:<16} {index:04} !!No Value!!");
         }
+    }
+
+    #[cfg(debug_assertions)]
+    fn print_local(name: &str, index: usize) {
+        println!("{name:<16} {index:04}");
     }
 }
 
