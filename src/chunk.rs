@@ -42,6 +42,7 @@ pub enum OpCode {
     GetGlobal(usize),
     GetLocal(usize),
     Greater,
+    JumpIfFalse(usize),
     Less,
     Multiply,
     Negate,
@@ -104,6 +105,14 @@ impl Chunk {
         &self.constants[index]
     }
 
+    pub fn code_len(&self) -> usize {
+        self.code.len()
+    }
+
+    pub fn patch_code(&mut self, index: usize) -> &mut OpCode {
+        &mut self.code[index]
+    }
+
     #[cfg(debug_assertions)]
     pub fn disassemble_chunk(&self, name: &str) {
         println!("== START CHUNK {name} ==");
@@ -122,7 +131,7 @@ impl Chunk {
         } else {
             print!("{line:>4} ");
         }
-        self.print_code(code);
+        self.print_code(code, index);
     }
 
     pub fn get_line(&self, index: usize) -> usize {
@@ -137,7 +146,7 @@ impl Chunk {
     }
 
     #[cfg(debug_assertions)]
-    fn print_code(&self, code: &OpCode) {
+    fn print_code(&self, code: &OpCode, index: usize) {
         match code {
             OpCode::Constant(const_index) => {
                 self.print_constant("Constant", usize::from(*const_index));
@@ -158,11 +167,14 @@ impl Chunk {
             OpCode::Less => println!("Less"),
             OpCode::Print => println!("Print"),
             OpCode::Pop => println!("Pop"),
-            OpCode::DefineGlobal(index) => self.print_constant("DefineGlobal", *index),
-            OpCode::GetGlobal(index) => self.print_constant("GetGlobal", *index),
-            OpCode::SetGlobal(index) => self.print_constant("SetGlobal", *index),
-            OpCode::GetLocal(index) => Self::print_local("GetLocal", *index),
-            OpCode::SetLocal(index) => Self::print_local("SetLocal", *index),
+            OpCode::DefineGlobal(const_index) => self.print_constant("DefineGlobal", *const_index),
+            OpCode::GetGlobal(const_index) => self.print_constant("GetGlobal", *const_index),
+            OpCode::SetGlobal(const_index) => self.print_constant("SetGlobal", *const_index),
+            OpCode::GetLocal(const_index) => Self::print_local("GetLocal", *const_index),
+            OpCode::SetLocal(const_index) => Self::print_local("SetLocal", *const_index),
+            OpCode::JumpIfFalse(jump_size) => {
+                Self::print_jump("JumpIfFalse", *jump_size, index, true);
+            }
         }
     }
 
@@ -179,6 +191,12 @@ impl Chunk {
     #[cfg(debug_assertions)]
     fn print_local(name: &str, index: usize) {
         println!("{name:<16} {index:04}");
+    }
+
+    #[cfg(debug_assertions)]
+    fn print_jump(name: &str, jump: usize, index: usize, add: bool) {
+        let target = if add { jump + index } else { index - jump };
+        println!("{name:<16} {index:<4} {target:<4}");
     }
 }
 

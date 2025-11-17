@@ -164,6 +164,7 @@ impl<'a> Compiler<'a> {
                 self.end_scope(line);
                 result
             }
+            Some(scanner::TokenType::If) => self.if_statement(),
             _ => self.expression_statement(),
         }
     }
@@ -212,6 +213,43 @@ impl<'a> Compiler<'a> {
         )?;
         self.chunk.write_chunk(chunk::OpCode::Pop, line);
         Ok(())
+    }
+
+    fn if_statement(&mut self) -> Result<(), Error> {
+        self.consume(
+            mem::discriminant(&scanner::TokenType::If),
+            "Require an if token to parse an if statement.",
+        )?;
+        self.consume(
+            mem::discriminant(&scanner::TokenType::LeftParen),
+            "Expect '(' after if.",
+        )?;
+        self.expression()?;
+        self.consume(
+            mem::discriminant(&scanner::TokenType::RightParen),
+            "Expect ')' after if condition.",
+        )?;
+
+        let jump_offset = self.emit_jump(chunk::OpCode::JumpIfFalse(0), 0); // TODO
+        self.statement()?;
+        self.patch_jump(jump_offset) // TODO
+    }
+
+    fn emit_jump(&mut self, instruction: chunk::OpCode, line: usize) -> usize {
+        self.chunk.write_chunk(instruction, line);
+        self.chunk.code_len() - 1
+    }
+
+    fn patch_jump(&mut self, offset: usize) -> Result<(), Error> {
+        let code_to_jump = self.chunk.code_len() - offset;
+        let code = self.chunk.patch_code(offset);
+        match code {
+            chunk::OpCode::JumpIfFalse(_) => {
+                *code = chunk::OpCode::JumpIfFalse(code_to_jump);
+                Ok(())
+            }
+            _ => Err(Self::error("Tried to path a non-jump instruction.")),
+        }
     }
 
     fn expression(&mut self) -> Result<(), Error> {

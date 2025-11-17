@@ -189,6 +189,16 @@ impl VM {
                     };
                     self.stack[*index] = value;
                 }
+                chunk::OpCode::JumpIfFalse(jump_size) => {
+                    let val = self.peek(0);
+                    if let Some(value) = val
+                        && value.is_falsey()
+                    {
+                        self.ip += jump_size;
+                    } else {
+                        Err(self.runtime_error(chunk, "No value found in stack for if condition."))?;
+                    }
+                }
             }
         }
     }
