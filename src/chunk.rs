@@ -45,6 +45,7 @@ pub enum OpCode {
     Jump(usize),
     JumpIfFalse(usize),
     Less,
+    Loop(usize),
     Multiply,
     Negate,
     Nil,
@@ -179,6 +180,7 @@ impl Chunk {
             OpCode::Jump(jump_size) => {
                 Self::print_jump("Jump", *jump_size, index, true);
             }
+            OpCode::Loop(jump_size) => Self::print_jump("Loop", *jump_size, index, false),
         }
     }
 
@@ -199,7 +201,11 @@ impl Chunk {
 
     #[cfg(debug_assertions)]
     fn print_jump(name: &str, jump: usize, index: usize, add: bool) {
-        let target = if add { jump + index } else { index - jump };
+        let target = if add {
+            jump + index + 1
+        } else {
+            index + 1 - jump
+        };
         println!("{name:<16} {index:04}->{target:04}");
     }
 }

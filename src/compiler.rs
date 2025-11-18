@@ -166,6 +166,7 @@ impl<'a> Compiler<'a> {
                 result
             }
             Some(scanner::TokenType::If) => self.if_statement(),
+            Some(scanner::TokenType::While) => self.while_statement(),
             _ => self.expression_statement(),
         }
     }
@@ -244,6 +245,32 @@ impl<'a> Compiler<'a> {
         self.patch_jump(else_jump_offset)
     }
 
+    fn while_statement(&mut self) -> Result<(), Error> {
+        let loop_start = self.chunk.code_len();
+        let while_line = self.consume(
+            mem::discriminant(&scanner::TokenType::While),
+            "Require a while token to parse a while statement.",
+        )?;
+        self.consume(
+            mem::discriminant(&scanner::TokenType::LeftParen),
+            "Expect '(' after while.",
+        )?;
+        self.expression()?;
+        self.consume(
+            mem::discriminant(&scanner::TokenType::RightParen),
+            "Expect ')' after while condition.",
+        )?;
+
+        let loop_exit = self.emit_jump(chunk::OpCode::JumpIfFalse(0), while_line);
+        self.chunk.write_chunk(chunk::OpCode::Pop, while_line);
+        self.statement()?;
+        let next_line = self.peek().map_or(0, |token| token.line);
+        self.emit_loop(loop_start, next_line);
+        self.patch_jump(loop_exit)?;
+        self.chunk.write_chunk(chunk::OpCode::Pop, while_line);
+        Ok(())
+    }
+
     fn emit_jump(&mut self, instruction: chunk::OpCode, line: usize) -> usize {
         self.chunk.write_chunk(instruction, line);
         self.chunk.code_len() - 1
@@ -263,6 +290,12 @@ impl<'a> Compiler<'a> {
             }
             _ => Err(Self::error("Tried to patch a non-jump instruction.")),
         }
+    }
+
+    fn emit_loop(&mut self, offset: usize, line: usize) {
+        let code_to_jump = self.chunk.code_len() - offset + 1;
+        self.chunk
+            .write_chunk(chunk::OpCode::Loop(code_to_jump), line);
     }
 
     fn expression(&mut self) -> Result<(), Error> {
@@ -1380,6 +1413,26 @@ mod tests {
                 OpCode::Pop,
             ],
             &[chunk::Value::String(Rc::from(String::from("no")))],
+        );
+    }
+
+    #[test]
+    fn while_keyword() {
+        let source = "while (true) print 1;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::True,
+                OpCode::JumpIfFalse(4),
+                OpCode::Pop,
+                OpCode::Constant(0),
+                OpCode::Print,
+                OpCode::Loop(6),
+                OpCode::Pop,
+            ],
+            &[chunk::Value::Number(1.)],
         );
     }
 

@@ -200,6 +200,9 @@ impl VM {
                 chunk::OpCode::Jump(jump_size) => {
                     self.ip += jump_size;
                 }
+                chunk::OpCode::Loop(jump_size) => {
+                    self.ip -= jump_size;
+                }
             }
         }
     }
