@@ -3,6 +3,7 @@
 mod chunk;
 mod compiler;
 mod error;
+mod object;
 mod scanner;
 mod vm;
 

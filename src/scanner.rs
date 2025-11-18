@@ -168,7 +168,7 @@ pub struct Token<'a> {
 }
 
 impl<'a> Token<'a> {
-    fn new(line: usize, token_type: TokenType<'a>) -> Self {
+    pub fn new(line: usize, token_type: TokenType<'a>) -> Self {
         Token { line, token_type }
     }
 }

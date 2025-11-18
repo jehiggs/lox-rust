@@ -1,6 +1,8 @@
 use crate::chunk;
 use crate::error::Error;
+use crate::object;
 use crate::scanner;
+use crate::scanner::Token;
 
 use std::iter;
 use std::mem;
@@ -10,7 +12,8 @@ const LOCAL_SIZE: usize = 255;
 
 pub struct Compiler<'a> {
     scanner: iter::Peekable<scanner::Scanner<'a>>,
-    chunk: chunk::Chunk,
+    function: object::Function,
+    function_type: object::FunctionType,
     locals: [Option<Local<'a>>; LOCAL_SIZE],
     local_count: usize,
     scope_depth: usize,
@@ -18,18 +21,23 @@ pub struct Compiler<'a> {
 
 impl<'a> Compiler<'a> {
     pub fn new(source: &'a str) -> Self {
-        Compiler {
+        let mut compiler = Compiler {
             scanner: scanner::Scanner::new(source).peekable(),
-            chunk: chunk::Chunk::new(),
+            function: object::Function::new(),
+            function_type: object::FunctionType::Script,
             locals: [const { None }; LOCAL_SIZE],
             local_count: 0,
             scope_depth: 0,
-        }
+        };
+        let fn_name = Local::Initialized(0, Token::new(0, scanner::TokenType::String("")));
+        compiler.locals[0] = Some(fn_name);
+        compiler.local_count = 1;
+        compiler
     }
 
-    pub fn compile(mut self) -> Result<chunk::Chunk, Error> {
+    pub fn compile(mut self) -> Result<object::Function, Error> {
         if self.peek().is_none() {
-            return Ok(self.chunk);
+            return Ok(self.function);
         }
         let mut result = Ok(());
         while self.peek().is_some() {
@@ -39,7 +47,7 @@ impl<'a> Compiler<'a> {
         if self.scanner.next().is_some() {
             return Err(Self::error("Compiler failed to parse all code in source."));
         }
-        result.map(|()| self.chunk)
+        result.map(|()| self.function)
     }
 
     // Returns the current token to process!
@@ -144,7 +152,7 @@ impl<'a> Compiler<'a> {
             _ = self.advance();
             self.expression()?;
         } else {
-            self.chunk.write_chunk(chunk::OpCode::Nil, line);
+            self.function.chunk.write_chunk(chunk::OpCode::Nil, line);
         }
 
         self.consume(
@@ -183,7 +191,7 @@ impl<'a> Compiler<'a> {
                 Some(Local::Initialized(depth, _)) if *depth > self.scope_depth => {
                     *item = None;
                     self.local_count -= 1;
-                    self.chunk.write_chunk(chunk::OpCode::Pop, line);
+                    self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
                 }
                 Some(_) | None => break,
             }
@@ -200,7 +208,9 @@ impl<'a> Compiler<'a> {
             mem::discriminant(&scanner::TokenType::Semicolon),
             "Expect ; after value.",
         )?;
-        self.chunk.write_chunk(chunk::OpCode::Print, token.line);
+        self.function
+            .chunk
+            .write_chunk(chunk::OpCode::Print, token.line);
         Ok(())
     }
 
@@ -214,7 +224,7 @@ impl<'a> Compiler<'a> {
             mem::discriminant(&scanner::TokenType::Semicolon),
             "Expect ; after expression statement.",
         )?;
-        self.chunk.write_chunk(chunk::OpCode::Pop, line);
+        self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
         Ok(())
     }
 
@@ -234,12 +244,14 @@ impl<'a> Compiler<'a> {
         )?;
 
         let then_jump_offset = self.emit_jump(chunk::OpCode::JumpIfFalse(0), if_line);
-        self.chunk.write_chunk(chunk::OpCode::Pop, if_line);
+        self.function.chunk.write_chunk(chunk::OpCode::Pop, if_line);
         self.statement()?;
         let next_line = self.peek().map_or(0, |token| token.line);
         let else_jump_offset = self.emit_jump(chunk::OpCode::Jump(0), next_line);
         self.patch_jump(then_jump_offset)?;
-        self.chunk.write_chunk(chunk::OpCode::Pop, next_line);
+        self.function
+            .chunk
+            .write_chunk(chunk::OpCode::Pop, next_line);
         if self.match_token(mem::discriminant(&scanner::TokenType::Else)) {
             self.statement()?;
         }
@@ -247,7 +259,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn while_statement(&mut self) -> Result<(), Error> {
-        let loop_start = self.chunk.code_len();
+        let loop_start = self.function.chunk.code_len();
         let while_line = self.consume(
             mem::discriminant(&scanner::TokenType::While),
             "Require a while token to parse a while statement.",
@@ -263,12 +275,16 @@ impl<'a> Compiler<'a> {
         )?;
 
         let loop_exit = self.emit_jump(chunk::OpCode::JumpIfFalse(0), while_line);
-        self.chunk.write_chunk(chunk::OpCode::Pop, while_line);
+        self.function
+            .chunk
+            .write_chunk(chunk::OpCode::Pop, while_line);
         self.statement()?;
         let next_line = self.peek().map_or(0, |token| token.line);
         self.emit_loop(loop_start, next_line);
         self.patch_jump(loop_exit)?;
-        self.chunk.write_chunk(chunk::OpCode::Pop, while_line);
+        self.function
+            .chunk
+            .write_chunk(chunk::OpCode::Pop, while_line);
         Ok(())
     }
 
@@ -291,7 +307,7 @@ impl<'a> Compiler<'a> {
             Some(_) => self.expression_statement()?,
             None => Err(Self::error("Required a token in a for loop."))?,
         }
-        let mut loop_start = self.chunk.code_len();
+        let mut loop_start = self.function.chunk.code_len();
 
         // Guard
         let condition_jump = match self.peek().map(|token| &token.token_type) {
@@ -303,7 +319,9 @@ impl<'a> Compiler<'a> {
                     "Require a ';' after loop condition.",
                 )?;
                 let exit_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), for_line);
-                self.chunk.write_chunk(chunk::OpCode::Pop, for_line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Pop, for_line);
                 Some(exit_jump)
             }
             None => Err(Self::error(
@@ -316,9 +334,11 @@ impl<'a> Compiler<'a> {
             Some(scanner::TokenType::RightParen) => {}
             Some(_) => {
                 let body_jump = self.emit_jump(chunk::OpCode::Jump(0), for_line);
-                let increment_start = self.chunk.code_len();
+                let increment_start = self.function.chunk.code_len();
                 self.expression()?;
-                self.chunk.write_chunk(chunk::OpCode::Pop, for_line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Pop, for_line);
                 self.emit_loop(loop_start, for_line);
                 loop_start = increment_start;
                 self.patch_jump(body_jump)?;
@@ -338,20 +358,20 @@ impl<'a> Compiler<'a> {
         self.emit_loop(loop_start, line);
         if let Some(jump_size) = condition_jump {
             self.patch_jump(jump_size)?;
-            self.chunk.write_chunk(chunk::OpCode::Pop, line);
+            self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
         }
         self.end_scope(line);
         Ok(())
     }
 
     fn emit_jump(&mut self, instruction: chunk::OpCode, line: usize) -> usize {
-        self.chunk.write_chunk(instruction, line);
-        self.chunk.code_len() - 1
+        self.function.chunk.write_chunk(instruction, line);
+        self.function.chunk.code_len() - 1
     }
 
     fn patch_jump(&mut self, offset: usize) -> Result<(), Error> {
-        let code_to_jump = self.chunk.code_len() - offset - 1;
-        let code = self.chunk.patch_code(offset);
+        let code_to_jump = self.function.chunk.code_len() - offset - 1;
+        let code = self.function.chunk.patch_code(offset);
         match code {
             chunk::OpCode::JumpIfFalse(_) => {
                 *code = chunk::OpCode::JumpIfFalse(code_to_jump);
@@ -366,8 +386,9 @@ impl<'a> Compiler<'a> {
     }
 
     fn emit_loop(&mut self, offset: usize, line: usize) {
-        let code_to_jump = self.chunk.code_len() - offset + 1;
-        self.chunk
+        let code_to_jump = self.function.chunk.code_len() - offset + 1;
+        self.function
+            .chunk
             .write_chunk(chunk::OpCode::Loop(code_to_jump), line);
     }
 
@@ -399,7 +420,8 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| Self::error("Missing required number token."))?;
         match token.token_type {
             scanner::TokenType::Number(value) => {
-                self.chunk
+                self.function
+                    .chunk
                     .write_constant_instruction(chunk::Value::Number(value), token.line);
                 Ok(())
             }
@@ -431,11 +453,15 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Unary)?;
         match token.token_type {
             scanner::TokenType::Minus => {
-                self.chunk.write_chunk(chunk::OpCode::Negate, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Negate, token.line);
                 Ok(())
             }
             scanner::TokenType::Bang => {
-                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
             _ => Err(Self::report_error(&token, "Non-unary operation found.")),
@@ -452,46 +478,72 @@ impl<'a> Compiler<'a> {
 
         match token.token_type {
             scanner::TokenType::Minus => {
-                self.chunk.write_chunk(chunk::OpCode::Subtract, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Subtract, token.line);
                 Ok(())
             }
             scanner::TokenType::Plus => {
-                self.chunk.write_chunk(chunk::OpCode::Add, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Add, token.line);
                 Ok(())
             }
             scanner::TokenType::Star => {
-                self.chunk.write_chunk(chunk::OpCode::Multiply, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Multiply, token.line);
                 Ok(())
             }
             scanner::TokenType::Slash => {
-                self.chunk.write_chunk(chunk::OpCode::Divide, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Divide, token.line);
                 Ok(())
             }
             scanner::TokenType::BangEqual => {
-                self.chunk.write_chunk(chunk::OpCode::Equal, token.line);
-                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Equal, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
             scanner::TokenType::EqualEqual => {
-                self.chunk.write_chunk(chunk::OpCode::Equal, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Equal, token.line);
                 Ok(())
             }
             scanner::TokenType::Greater => {
-                self.chunk.write_chunk(chunk::OpCode::Greater, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Greater, token.line);
                 Ok(())
             }
             scanner::TokenType::GreaterEqual => {
-                self.chunk.write_chunk(chunk::OpCode::Less, token.line);
-                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Less, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
             scanner::TokenType::Less => {
-                self.chunk.write_chunk(chunk::OpCode::Less, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Less, token.line);
                 Ok(())
             }
             scanner::TokenType::LessEqual => {
-                self.chunk.write_chunk(chunk::OpCode::Greater, token.line);
-                self.chunk.write_chunk(chunk::OpCode::Not, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Greater, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
             _ => Err(Self::report_error(
@@ -507,15 +559,21 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| Self::error("Missing reuqired literal token."))?;
         match token.token_type {
             scanner::TokenType::False => {
-                self.chunk.write_chunk(chunk::OpCode::False, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::False, token.line);
                 Ok(())
             }
             scanner::TokenType::True => {
-                self.chunk.write_chunk(chunk::OpCode::True, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::True, token.line);
                 Ok(())
             }
             scanner::TokenType::Nil => {
-                self.chunk.write_chunk(chunk::OpCode::Nil, token.line);
+                self.function
+                    .chunk
+                    .write_chunk(chunk::OpCode::Nil, token.line);
                 Ok(())
             }
             _ => Err(Self::report_error(
@@ -531,7 +589,8 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| Self::error("Missing required string token."))?;
         match token.token_type {
             scanner::TokenType::String(string) => {
-                self.chunk
+                self.function
+                    .chunk
                     .write_constant_instruction(chunk::Value::String(Rc::from(string)), token.line);
                 Ok(())
             }
@@ -568,6 +627,7 @@ impl<'a> Compiler<'a> {
             )
         } else {
             let index = self
+                .function
                 .chunk
                 .write_constant(chunk::Value::String(Rc::from(ident)));
             (
@@ -577,9 +637,9 @@ impl<'a> Compiler<'a> {
         };
         if can_assign && self.match_token(mem::discriminant(&scanner::TokenType::Equal)) {
             self.expression()?;
-            self.chunk.write_chunk(set_op, token.line);
+            self.function.chunk.write_chunk(set_op, token.line);
         } else {
-            self.chunk.write_chunk(get_op, token.line);
+            self.function.chunk.write_chunk(get_op, token.line);
         }
         Ok(())
     }
@@ -634,6 +694,7 @@ impl<'a> Compiler<'a> {
                         Ok(0)
                     } else {
                         let index = self
+                            .function
                             .chunk
                             .write_constant(chunk::Value::String(Rc::from(ident)));
                         Ok(index)
@@ -690,7 +751,8 @@ impl<'a> Compiler<'a> {
             }
             return;
         }
-        self.chunk
+        self.function
+            .chunk
             .write_chunk(chunk::OpCode::DefineGlobal(index), line);
     }
 
@@ -700,7 +762,9 @@ impl<'a> Compiler<'a> {
             "Expected an 'and' token.",
         )?;
         let jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line);
-        self.chunk.write_chunk(chunk::OpCode::Pop, next_line);
+        self.function
+            .chunk
+            .write_chunk(chunk::OpCode::Pop, next_line);
         self.parse_precedence(Precedence::And)?;
         self.patch_jump(jump)
     }
@@ -713,7 +777,9 @@ impl<'a> Compiler<'a> {
         let first_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line);
         let second_jump = self.emit_jump(chunk::OpCode::Jump(0), next_line);
         self.patch_jump(first_jump)?;
-        self.chunk.write_chunk(chunk::OpCode::Pop, next_line);
+        self.function
+            .chunk
+            .write_chunk(chunk::OpCode::Pop, next_line);
 
         self.parse_precedence(Precedence::Or)?;
         self.patch_jump(second_jump)
@@ -904,11 +970,15 @@ mod tests {
     use super::*;
     use crate::chunk::*;
 
+    fn compile(source: &str) -> Chunk {
+        let compiler = Compiler::new(source);
+        compiler.compile().unwrap().chunk
+    }
+
     #[test]
     fn basic_parse() {
         let source = "1 - 2;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -924,8 +994,7 @@ mod tests {
     #[test]
     fn precedence_left() {
         let source = "1 * 2 + 3;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -947,8 +1016,7 @@ mod tests {
     #[test]
     fn precedence_right() {
         let source = "1 + 2 / 3;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -970,8 +1038,7 @@ mod tests {
     #[test]
     fn unary() {
         let source = "-1;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[OpCode::Constant(0), OpCode::Negate, OpCode::Pop],
@@ -982,8 +1049,7 @@ mod tests {
     #[test]
     fn prefix_and_infix() {
         let source = "-1 + 2;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1000,8 +1066,7 @@ mod tests {
     #[test]
     fn grouping() {
         let source = "(1 + 2) * 3;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1023,8 +1088,7 @@ mod tests {
     #[test]
     fn nested_grouping() {
         let source = "1 + (2 * (3 + 4));";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1049,8 +1113,7 @@ mod tests {
     #[test]
     fn empty() {
         let source = "";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(&chunk, &[], &[]);
     }
 
@@ -1089,48 +1152,42 @@ mod tests {
     #[test]
     fn true_value() {
         let source = "true;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(&chunk, &[OpCode::True, OpCode::Pop], &[]);
     }
 
     #[test]
     fn false_value() {
         let source = "false;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(&chunk, &[OpCode::False, OpCode::Pop], &[]);
     }
 
     #[test]
     fn nil_value() {
         let source = "nil;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(&chunk, &[OpCode::Nil, OpCode::Pop], &[]);
     }
 
     #[test]
     fn not_operation() {
         let source = "!true;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(&chunk, &[OpCode::True, OpCode::Not, OpCode::Pop], &[]);
     }
 
     #[test]
     fn negate_non_number() {
         let source = "-false;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(&chunk, &[OpCode::False, OpCode::Negate, OpCode::Pop], &[]);
     }
 
     #[test]
     fn equality() {
         let source = "1 == 2;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1146,8 +1203,7 @@ mod tests {
     #[test]
     fn greater_and_lesser() {
         let source = "1 < 2 > 3;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1169,8 +1225,7 @@ mod tests {
     #[test]
     fn greater_equal() {
         let source = "1 >= 2;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1187,8 +1242,7 @@ mod tests {
     #[test]
     fn less_equal() {
         let source = "1 <= 2;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1205,8 +1259,7 @@ mod tests {
     #[test]
     fn not_equal() {
         let source = "1 != 2;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1223,8 +1276,7 @@ mod tests {
     #[test]
     fn strings() {
         let source = "\"foo\";";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[OpCode::Constant(0), OpCode::Pop],
@@ -1235,8 +1287,7 @@ mod tests {
     #[test]
     fn addition_wrong_types() {
         let source = "1 + \"foo\";";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1254,10 +1305,8 @@ mod tests {
 
     #[test]
     fn global_variable() {
-        let source = "var foo = 12;
-            print foo;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let source = "var foo = 12; print foo;";
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1276,10 +1325,8 @@ mod tests {
 
     #[test]
     fn uninitialized_global() {
-        let source = "var foo;
-            print foo;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let source = "var foo; print foo;";
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1305,10 +1352,8 @@ mod tests {
 
     #[test]
     fn variable_in_statement() {
-        let source = "var foo = 1;
-            print 1 + foo;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let source = "var foo = 1; print 1 + foo;";
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1330,8 +1375,7 @@ mod tests {
 
     #[test]
     fn error_in_first_line() {
-        let source = "var;
-            var foo = 1;";
+        let source = "var; var foo = 1;";
         let compiler = Compiler::new(source);
         let result = compiler.compile();
         assert!(matches!(result, Err(Error::CompileError(_))));
@@ -1339,10 +1383,8 @@ mod tests {
 
     #[test]
     fn assignment() {
-        let source = "var foo;
-            foo = 1;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let source = "var foo; foo = 1;";
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1371,13 +1413,12 @@ mod tests {
     #[test]
     fn define_local_variable() {
         let source = "{ var a = 10; print a; }";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
                 OpCode::Constant(0),
-                OpCode::GetLocal(0),
+                OpCode::GetLocal(1),
                 OpCode::Print,
                 OpCode::Pop,
             ],
@@ -1388,16 +1429,15 @@ mod tests {
     #[test]
     fn get_local_variable() {
         let source = "{ var a = 10; a = 20; print a;}";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
-                OpCode::SetLocal(0),
+                OpCode::SetLocal(1),
                 OpCode::Pop,
-                OpCode::GetLocal(0),
+                OpCode::GetLocal(1),
                 OpCode::Print,
                 OpCode::Pop,
             ],
@@ -1408,17 +1448,16 @@ mod tests {
     #[test]
     fn shadowed_variable() {
         let source = "{ var a = 10; { var a = 20; print a; } print a; }";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
-                OpCode::GetLocal(1),
+                OpCode::GetLocal(2),
                 OpCode::Print,
                 OpCode::Pop,
-                OpCode::GetLocal(0),
+                OpCode::GetLocal(1),
                 OpCode::Print,
                 OpCode::Pop,
             ],
@@ -1445,8 +1484,7 @@ mod tests {
     #[test]
     fn and_keyword() {
         let source = "if (true and false) print \"no\";";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1468,8 +1506,7 @@ mod tests {
     #[test]
     fn or_keyword() {
         let source = "if (true or false) print \"no\";";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1492,8 +1529,7 @@ mod tests {
     #[test]
     fn while_keyword() {
         let source = "while (true) print 1;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
@@ -1512,25 +1548,24 @@ mod tests {
     #[test]
     fn for_keyword_all_specified() {
         let source = "for (var i = 0; i < 10; i = i + 1) print i;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[
                 OpCode::Constant(0),
-                OpCode::GetLocal(0),
+                OpCode::GetLocal(1),
                 OpCode::Constant(1),
                 OpCode::Less,
                 OpCode::JumpIfFalse(11),
                 OpCode::Pop,
                 OpCode::Jump(6),
-                OpCode::GetLocal(0),
+                OpCode::GetLocal(1),
                 OpCode::Constant(2),
                 OpCode::Add,
-                OpCode::SetLocal(0),
+                OpCode::SetLocal(1),
                 OpCode::Pop,
                 OpCode::Loop(12),
-                OpCode::GetLocal(0),
+                OpCode::GetLocal(1),
                 OpCode::Print,
                 OpCode::Loop(9),
                 OpCode::Pop,
@@ -1547,8 +1582,7 @@ mod tests {
     #[test]
     fn for_keyword_no_initializer() {
         let source = "var i = 0; for (; i < 10; i = i + 1) print i;";
-        let compiler = Compiler::new(source);
-        let chunk = compiler.compile().unwrap();
+        let chunk = compile(source);
         check_chunk(
             &chunk,
             &[

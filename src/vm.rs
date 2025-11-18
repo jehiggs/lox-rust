@@ -30,10 +30,17 @@ impl VM {
     pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
         self.reset();
         let compiler = compiler::Compiler::new(source);
-        let chunk = compiler.compile()?;
+        let script = compiler.compile()?;
         #[cfg(debug_assertions)]
-        chunk.disassemble_chunk("Test");
-        self.run(&chunk)
+        {
+            let name = if script.name.is_empty() {
+                "<script>"
+            } else {
+                &script.name
+            };
+            script.chunk.disassemble_chunk(name);
+        }
+        self.run(&script.chunk)
     }
 
     fn reset(&mut self) {
