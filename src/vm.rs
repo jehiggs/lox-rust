@@ -358,6 +358,36 @@ mod tests {
         test_invalid(source);
     }
 
+    #[test]
+    fn if_statement() {
+        let source = "if (true) print 1; else print 0;";
+        test_valid(source);
+    }
+
+    #[test]
+    fn while_statement() {
+        let source = "var j = 0; while (j < 4) { print j; j = j + 1; }";
+        test_valid(source);
+    }
+
+    #[test]
+    fn for_statement() {
+        let source = "for (var i = 0; i < 10; i = i + 1) print i;";
+        test_valid(source);
+    }
+
+    #[test]
+    fn and_condition() {
+        let source = "if (true and false) print 0;";
+        test_valid(source);
+    }
+
+    #[test]
+    fn or_condition() {
+        let source = "if (false or true) print 1;";
+        test_valid(source);
+    }
+
     fn test_valid(source: &str) {
         let mut vm = VM::new();
         let result = vm.interpret(source);

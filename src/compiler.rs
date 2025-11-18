@@ -167,6 +167,7 @@ impl<'a> Compiler<'a> {
             }
             Some(scanner::TokenType::If) => self.if_statement(),
             Some(scanner::TokenType::While) => self.while_statement(),
+            Some(scanner::TokenType::For) => self.for_statement(),
             _ => self.expression_statement(),
         }
     }
@@ -268,6 +269,78 @@ impl<'a> Compiler<'a> {
         self.emit_loop(loop_start, next_line);
         self.patch_jump(loop_exit)?;
         self.chunk.write_chunk(chunk::OpCode::Pop, while_line);
+        Ok(())
+    }
+
+    fn for_statement(&mut self) -> Result<(), Error> {
+        self.begin_scope();
+        let for_line = self.consume(
+            mem::discriminant(&scanner::TokenType::For),
+            "Require a for token to parse a for statement.",
+        )?;
+        self.consume(
+            mem::discriminant(&scanner::TokenType::LeftParen),
+            "Require '(' after a for statement.",
+        )?;
+        // Initializer.
+        match self.peek().map(|token| &token.token_type) {
+            Some(scanner::TokenType::Var) => self.var_declaration()?,
+            Some(scanner::TokenType::Semicolon) => {
+                self.advance();
+            }
+            Some(_) => self.expression_statement()?,
+            None => Err(Self::error("Required a token in a for loop."))?,
+        }
+        let mut loop_start = self.chunk.code_len();
+
+        // Guard
+        let condition_jump = match self.peek().map(|token| &token.token_type) {
+            Some(scanner::TokenType::Semicolon) => None,
+            Some(_) => {
+                self.expression()?;
+                self.consume(
+                    mem::discriminant(&scanner::TokenType::Semicolon),
+                    "Require a ';' after loop condition.",
+                )?;
+                let exit_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), for_line);
+                self.chunk.write_chunk(chunk::OpCode::Pop, for_line);
+                Some(exit_jump)
+            }
+            None => Err(Self::error(
+                "Required a token while parsing the guard in a 'for' loop.",
+            ))?,
+        };
+
+        // Increment
+        match self.peek().map(|token| &token.token_type) {
+            Some(scanner::TokenType::RightParen) => {}
+            Some(_) => {
+                let body_jump = self.emit_jump(chunk::OpCode::Jump(0), for_line);
+                let increment_start = self.chunk.code_len();
+                self.expression()?;
+                self.chunk.write_chunk(chunk::OpCode::Pop, for_line);
+                self.emit_loop(loop_start, for_line);
+                loop_start = increment_start;
+                self.patch_jump(body_jump)?;
+            }
+            None => Err(Self::error(
+                "Required a token while parsing the increment in a 'for' loop.",
+            ))?,
+        }
+        self.consume(
+            mem::discriminant(&scanner::TokenType::RightParen),
+            "Require a ')' at the end of a for loop body.",
+        )?;
+
+        // Body
+        self.statement()?;
+        let line = self.peek().map_or(0, |token| token.line);
+        self.emit_loop(loop_start, line);
+        if let Some(jump_size) = condition_jump {
+            self.patch_jump(jump_size)?;
+            self.chunk.write_chunk(chunk::OpCode::Pop, line);
+        }
+        self.end_scope(line);
         Ok(())
     }
 
@@ -1433,6 +1506,81 @@ mod tests {
                 OpCode::Pop,
             ],
             &[chunk::Value::Number(1.)],
+        );
+    }
+
+    #[test]
+    fn for_keyword_all_specified() {
+        let source = "for (var i = 0; i < 10; i = i + 1) print i;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(0),
+                OpCode::GetLocal(0),
+                OpCode::Constant(1),
+                OpCode::Less,
+                OpCode::JumpIfFalse(11),
+                OpCode::Pop,
+                OpCode::Jump(6),
+                OpCode::GetLocal(0),
+                OpCode::Constant(2),
+                OpCode::Add,
+                OpCode::SetLocal(0),
+                OpCode::Pop,
+                OpCode::Loop(12),
+                OpCode::GetLocal(0),
+                OpCode::Print,
+                OpCode::Loop(9),
+                OpCode::Pop,
+                OpCode::Pop,
+            ],
+            &[
+                chunk::Value::Number(0.),
+                chunk::Value::Number(10.),
+                chunk::Value::Number(1.),
+            ],
+        );
+    }
+
+    #[test]
+    fn for_keyword_no_initializer() {
+        let source = "var i = 0; for (; i < 10; i = i + 1) print i;";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(1),
+                OpCode::DefineGlobal(0),
+                OpCode::GetGlobal(2),
+                OpCode::Constant(3),
+                OpCode::Less,
+                OpCode::JumpIfFalse(11),
+                OpCode::Pop,
+                OpCode::Jump(6),
+                OpCode::GetGlobal(5),
+                OpCode::Constant(6),
+                OpCode::Add,
+                OpCode::SetGlobal(4),
+                OpCode::Pop,
+                OpCode::Loop(12),
+                OpCode::GetGlobal(7),
+                OpCode::Print,
+                OpCode::Loop(9),
+                OpCode::Pop,
+            ],
+            &[
+                chunk::Value::String(Rc::from(String::from("j"))),
+                chunk::Value::Number(0.),
+                chunk::Value::String(Rc::from(String::from("j"))),
+                chunk::Value::Number(10.),
+                chunk::Value::String(Rc::from(String::from("j"))),
+                chunk::Value::String(Rc::from(String::from("j"))),
+                chunk::Value::Number(1.),
+                chunk::Value::String(Rc::from(String::from("j"))),
+            ],
         );
     }
 
