@@ -234,10 +234,7 @@ impl<'a> Compiler<'a> {
         let then_jump_offset = self.emit_jump(chunk::OpCode::JumpIfFalse(0), if_line);
         self.chunk.write_chunk(chunk::OpCode::Pop, if_line);
         self.statement()?;
-        let next_line = self
-            .peek()
-            .map(|token| token.line)
-            .ok_or_else(|| Self::error("Expected a token in an if statement."))?;
+        let next_line = self.peek().map_or(0, |token| token.line);
         let else_jump_offset = self.emit_jump(chunk::OpCode::Jump(0), next_line);
         self.patch_jump(then_jump_offset)?;
         self.chunk.write_chunk(chunk::OpCode::Pop, next_line);
@@ -591,6 +588,31 @@ impl<'a> Compiler<'a> {
             .write_chunk(chunk::OpCode::DefineGlobal(index), line);
     }
 
+    fn parse_and(&mut self, _: bool) -> Result<(), Error> {
+        let next_line = self.consume(
+            mem::discriminant(&scanner::TokenType::And),
+            "Expected an 'and' token.",
+        )?;
+        let jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line);
+        self.chunk.write_chunk(chunk::OpCode::Pop, next_line);
+        self.parse_precedence(Precedence::And)?;
+        self.patch_jump(jump)
+    }
+
+    fn parse_or(&mut self, _: bool) -> Result<(), Error> {
+        let next_line = self.consume(
+            mem::discriminant(&scanner::TokenType::Or),
+            "Expected an 'or' token.",
+        )?;
+        let first_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line);
+        let second_jump = self.emit_jump(chunk::OpCode::Jump(0), next_line);
+        self.patch_jump(first_jump)?;
+        self.chunk.write_chunk(chunk::OpCode::Pop, next_line);
+
+        self.parse_precedence(Precedence::Or)?;
+        self.patch_jump(second_jump)
+    }
+
     #[allow(clippy::match_same_arms)]
     fn get_rule(token_type: &scanner::TokenType<'a>) -> ParseTableEntry<'a> {
         match token_type {
@@ -648,7 +670,9 @@ impl<'a> Compiler<'a> {
             scanner::TokenType::Number(_) => {
                 ParseTableEntry::new(Some(Self::number), None, Precedence::None)
             }
-            scanner::TokenType::And => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::And => {
+                ParseTableEntry::new(None, Some(Self::parse_and), Precedence::And)
+            }
             scanner::TokenType::Class => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Else => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::False => {
@@ -660,7 +684,9 @@ impl<'a> Compiler<'a> {
             scanner::TokenType::Nil => {
                 ParseTableEntry::new(Some(Self::literal), None, Precedence::None)
             }
-            scanner::TokenType::Or => ParseTableEntry::new(None, None, Precedence::None),
+            scanner::TokenType::Or => {
+                ParseTableEntry::new(None, Some(Self::parse_or), Precedence::Or)
+            }
             scanner::TokenType::Print => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Return => ParseTableEntry::new(None, None, Precedence::None),
             scanner::TokenType::Super => ParseTableEntry::new(None, None, Precedence::None),
@@ -1308,6 +1334,53 @@ mod tests {
         let compiler = Compiler::new(source);
         let result = compiler.compile();
         assert!(matches!(result, Err(Error::CompileError(_))));
+    }
+
+    #[test]
+    fn and_keyword() {
+        let source = "if (true and false) print \"no\";";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::True,
+                OpCode::JumpIfFalse(2),
+                OpCode::Pop,
+                OpCode::False,
+                OpCode::JumpIfFalse(4),
+                OpCode::Pop,
+                OpCode::Constant(0),
+                OpCode::Print,
+                OpCode::Jump(1),
+                OpCode::Pop,
+            ],
+            &[chunk::Value::String(Rc::from(String::from("no")))],
+        );
+    }
+
+    #[test]
+    fn or_keyword() {
+        let source = "if (true or false) print \"no\";";
+        let compiler = Compiler::new(source);
+        let chunk = compiler.compile().unwrap();
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::True,
+                OpCode::JumpIfFalse(1),
+                OpCode::Jump(2),
+                OpCode::Pop,
+                OpCode::False,
+                OpCode::JumpIfFalse(4),
+                OpCode::Pop,
+                OpCode::Constant(0),
+                OpCode::Print,
+                OpCode::Jump(1),
+                OpCode::Pop,
+            ],
+            &[chunk::Value::String(Rc::from(String::from("no")))],
+        );
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {
