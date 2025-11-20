@@ -21,18 +21,14 @@ pub struct Compiler<'a> {
 
 impl<'a> Compiler<'a> {
     pub fn new(source: &'a str) -> Self {
-        let mut compiler = Compiler {
+        Compiler {
             scanner: scanner::Scanner::new(source).peekable(),
             function: object::Function::new(),
             function_type: object::FunctionType::Script,
             locals: [const { None }; LOCAL_SIZE],
             local_count: 0,
             scope_depth: 0,
-        };
-        let fn_name = Local::Initialized(0, Token::new(0, scanner::TokenType::String("")));
-        compiler.locals[0] = Some(fn_name);
-        compiler.local_count = 1;
-        compiler
+        }
     }
 
     pub fn compile(mut self) -> Result<object::Function, Error> {
@@ -1418,7 +1414,7 @@ mod tests {
             &chunk,
             &[
                 OpCode::Constant(0),
-                OpCode::GetLocal(1),
+                OpCode::GetLocal(0),
                 OpCode::Print,
                 OpCode::Pop,
             ],
@@ -1435,9 +1431,9 @@ mod tests {
             &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
-                OpCode::SetLocal(1),
+                OpCode::SetLocal(0),
                 OpCode::Pop,
-                OpCode::GetLocal(1),
+                OpCode::GetLocal(0),
                 OpCode::Print,
                 OpCode::Pop,
             ],
@@ -1454,10 +1450,10 @@ mod tests {
             &[
                 OpCode::Constant(0),
                 OpCode::Constant(1),
-                OpCode::GetLocal(2),
+                OpCode::GetLocal(1),
                 OpCode::Print,
                 OpCode::Pop,
-                OpCode::GetLocal(1),
+                OpCode::GetLocal(0),
                 OpCode::Print,
                 OpCode::Pop,
             ],
@@ -1553,19 +1549,19 @@ mod tests {
             &chunk,
             &[
                 OpCode::Constant(0),
-                OpCode::GetLocal(1),
+                OpCode::GetLocal(0),
                 OpCode::Constant(1),
                 OpCode::Less,
                 OpCode::JumpIfFalse(11),
                 OpCode::Pop,
                 OpCode::Jump(6),
-                OpCode::GetLocal(1),
+                OpCode::GetLocal(0),
                 OpCode::Constant(2),
                 OpCode::Add,
-                OpCode::SetLocal(1),
+                OpCode::SetLocal(0),
                 OpCode::Pop,
                 OpCode::Loop(12),
-                OpCode::GetLocal(1),
+                OpCode::GetLocal(0),
                 OpCode::Print,
                 OpCode::Loop(9),
                 OpCode::Pop,
