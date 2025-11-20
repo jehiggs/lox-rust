@@ -243,6 +243,7 @@ impl VM {
                 chunk::OpCode::Loop(jump_size) => {
                     frame.ip -= jump_size;
                 }
+                chunk::OpCode::Call(arg_count) => {}
             }
         }
     }

@@ -4,17 +4,17 @@ use std::fmt::Display;
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
-    arity: usize,
+    pub arity: usize,
     pub chunk: chunk::Chunk,
     pub name: String,
 }
 
 impl Function {
-    pub fn new() -> Self {
+    pub fn new(name: &str) -> Self {
         Function {
             arity: 0,
             chunk: chunk::Chunk::new(),
-            name: String::new(),
+            name: String::from(name),
         }
     }
 }

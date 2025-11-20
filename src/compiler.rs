@@ -2,7 +2,6 @@ use crate::chunk;
 use crate::error::Error;
 use crate::object;
 use crate::scanner;
-use crate::scanner::Token;
 
 use std::iter;
 use std::mem;
@@ -23,7 +22,7 @@ impl<'a> Compiler<'a> {
     pub fn new(source: &'a str) -> Self {
         Compiler {
             scanner: scanner::Scanner::new(source).peekable(),
-            function: object::Function::new(),
+            function: object::Function::new(""),
             function_type: object::FunctionType::Script,
             locals: [const { None }; LOCAL_SIZE],
             local_count: 0,
@@ -105,6 +104,16 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn check(&mut self, token_type: mem::Discriminant<scanner::TokenType<'a>>) -> bool {
+        if let Some(token) = self.peek()
+            && mem::discriminant(&token.token_type) == token_type
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn synchronize(&mut self) {
         while let Some(token) = self.peek() {
             match token.token_type {
@@ -132,6 +141,7 @@ impl<'a> Compiler<'a> {
     fn declaration(&mut self) -> Result<(), Error> {
         let result = match self.peek().map(|token| &token.token_type) {
             Some(scanner::TokenType::Var) => self.var_declaration(),
+            Some(scanner::TokenType::Fun) => self.fun_declaration(),
             _ => self.statement(),
         };
         result.inspect_err(|_| self.synchronize())
@@ -156,6 +166,67 @@ impl<'a> Compiler<'a> {
             "Expect ';' after a variable declaration.",
         )?;
         self.define_variable(global, line);
+        Ok(())
+    }
+
+    fn fun_declaration(&mut self) -> Result<(), Error> {
+        let line = self
+            .advance()
+            .map(|token| token.line)
+            .ok_or_else(|| Self::error("Expected a token in a function declaration."))?;
+        let name = if let Some(token) = self.peek() {
+            if let scanner::TokenType::Identifier(ident) = token.token_type {
+                ident
+            } else {
+                return Err(Self::report_error(
+                    token,
+                    "Did not get a function name identifier.",
+                ));
+            }
+        } else {
+            return Err(Self::error("Missing token when parsing a function."));
+        };
+        let global = self.parse_variable("Failed to parse a function name.")?;
+        self.mark_initialized();
+        self.function(object::FunctionType::Function, name)?;
+        self.define_variable(global, line);
+        Ok(())
+    }
+
+    fn function(&mut self, function_type: object::FunctionType, name: &str) -> Result<(), Error> {
+        let old_fn = mem::replace(&mut self.function, object::Function::new(name));
+        let old_fn_type = mem::replace(&mut self.function_type, function_type);
+        self.begin_scope();
+        self.consume(
+            mem::discriminant(&scanner::TokenType::LeftParen),
+            "Expect '(' after function name.",
+        )?;
+        while !self.check(mem::discriminant(&scanner::TokenType::RightParen)) {
+            self.function.arity += 1;
+            if self.function.arity > 255 {
+                return Err(Self::error("Over 255 function parameters provided."));
+            }
+            let constant = self.parse_variable("Expected a parameter name.")?;
+            self.define_variable(constant, 0); // TODO.
+            if !self.check(mem::discriminant(&scanner::TokenType::RightParen)) {
+                self.consume(
+                    mem::discriminant(&scanner::TokenType::Comma),
+                    "Expect a ',' between parameters.",
+                )?;
+            }
+        }
+        self.consume(
+            mem::discriminant(&scanner::TokenType::RightParen),
+            "Expect ')' after function parameters.",
+        )?;
+        self.block()?;
+
+        let function = mem::replace(&mut self.function, old_fn);
+        self.end_scope(0); // TODO.
+        self.function_type = old_fn_type;
+        self.function
+            .chunk
+            .write_constant_instruction(chunk::Value::Function(Rc::from(function)), 0); // TODO
         Ok(())
     }
 
@@ -549,10 +620,21 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn call(&mut self, _: bool) -> Result<(), Error> {
+        let token = self
+            .advance()
+            .ok_or_else(|| Self::error("Missing required left parenthesis in call."))?;
+        let arg_count = self.argument_list()?;
+        self.function
+            .chunk
+            .write_chunk(chunk::OpCode::Call(arg_count), token.line);
+        Ok(())
+    }
+
     fn literal(&mut self, _: bool) -> Result<(), Error> {
         let token = self
             .advance()
-            .ok_or_else(|| Self::error("Missing reuqired literal token."))?;
+            .ok_or_else(|| Self::error("Missing required literal token."))?;
         match token.token_type {
             scanner::TokenType::False => {
                 self.function
@@ -742,14 +824,44 @@ impl<'a> Compiler<'a> {
 
     fn define_variable(&mut self, index: usize, line: usize) {
         if self.scope_depth > 0 {
-            if let Some(local) = self.locals[self.local_count - 1].take() {
-                self.locals[self.local_count - 1] = Some(local.initialize(self.scope_depth));
-            }
+            self.mark_initialized();
             return;
         }
         self.function
             .chunk
             .write_chunk(chunk::OpCode::DefineGlobal(index), line);
+    }
+
+    fn argument_list(&mut self) -> Result<usize, Error> {
+        let mut arg_count = 0;
+        while !self.check(mem::discriminant(&scanner::TokenType::RightParen)) {
+            self.expression()?;
+            arg_count += 1;
+            if arg_count >= 255 {
+                return Err(Self::error(
+                    "Cannot pass more than 255 arguments to a function.",
+                ));
+            }
+            if !self.check(mem::discriminant(&scanner::TokenType::RightParen)) {
+                self.consume(
+                    mem::discriminant(&scanner::TokenType::Comma),
+                    "Arguments to a function call should be separated with ','.",
+                )?;
+            }
+        }
+        self.consume(
+            mem::discriminant(&scanner::TokenType::RightParen),
+            "Call should end with ')'.",
+        )?;
+        Ok(arg_count)
+    }
+
+    fn mark_initialized(&mut self) {
+        if self.scope_depth > 0
+            && let Some(local) = self.locals[self.local_count - 1].take()
+        {
+            self.locals[self.local_count - 1] = Some(local.initialize(self.scope_depth));
+        }
     }
 
     fn parse_and(&mut self, _: bool) -> Result<(), Error> {
@@ -785,7 +897,7 @@ impl<'a> Compiler<'a> {
     fn get_rule(token_type: &scanner::TokenType<'a>) -> ParseTableEntry<'a> {
         match token_type {
             scanner::TokenType::LeftParen => {
-                ParseTableEntry::new(Some(Self::grouping), None, Precedence::None)
+                ParseTableEntry::new(Some(Self::grouping), Some(Self::call), Precedence::Call)
             }
             scanner::TokenType::RightParen => {
                 ParseTableEntry::new(Some(Self::grouping), None, Precedence::None)
@@ -1612,6 +1724,12 @@ mod tests {
                 chunk::Value::String(Rc::from(String::from("j"))),
             ],
         );
+    }
+
+    #[test]
+    fn function_declaration() {
+        let source = "fun areWeHavingIt() { print 1; } print areWeHavingIt;";
+        compile(source);
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {

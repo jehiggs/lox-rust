@@ -1,3 +1,4 @@
+use crate::object::Function;
 use std::fmt;
 use std::rc::Rc;
 
@@ -7,13 +8,14 @@ pub enum Value {
     Number(f64),
     Nil,
     String(Rc<str>),
+    Function(Rc<Function>),
 }
 
 impl Value {
     pub fn is_falsey(&self) -> bool {
         match self {
             Value::Bool(value) => !value,
-            Value::Number(_) | Value::String(_) => false,
+            Value::Number(_) | Value::String(_) | Value::Function(_) => false,
             Value::Nil => true,
         }
     }
@@ -26,6 +28,7 @@ impl fmt::Display for Value {
             Value::Number(number) => write!(f, "{number}"),
             Value::Nil => write!(f, "nil"),
             Value::String(string) => write!(f, "{string}"),
+            Value::Function(func) => write!(f, "{func}"),
         }
     }
 }
@@ -33,6 +36,7 @@ impl fmt::Display for Value {
 #[derive(Debug, PartialEq)]
 pub enum OpCode {
     Add,
+    Call(usize),
     Constant(u8),
     ConstantLong(usize),
     DefineGlobal(usize),
@@ -181,6 +185,7 @@ impl Chunk {
                 Self::print_jump("Jump", *jump_size, index, true);
             }
             OpCode::Loop(jump_size) => Self::print_jump("Loop", *jump_size, index, false),
+            OpCode::Call(_) => println!("Call"),
         }
     }
 
