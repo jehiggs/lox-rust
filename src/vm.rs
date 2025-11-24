@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::mem;
 use std::rc::Rc;
 
 use crate::chunk;
@@ -61,23 +62,40 @@ impl VM {
             .call_stack
             .pop()
             .ok_or(Error::RuntimeError("No frame on call stack."))?;
-        let chunk = &frame.function.chunk;
         loop {
-            let instruction = chunk.read_code(frame.ip);
+            let instruction = *frame.function.chunk.read_code(frame.ip);
             #[cfg(debug_assertions)]
-            self.debug_instruction(&frame, instruction);
+            self.debug_instruction(&frame, &instruction);
             frame.ip += 1;
             match instruction {
-                &chunk::OpCode::Constant(index) => {
-                    let constant = chunk.read_constant(index.into());
+                chunk::OpCode::Constant(index) => {
+                    let constant = frame.function.chunk.read_constant(index.into());
                     self.push_constant(constant);
                 }
-                &chunk::OpCode::ConstantLong(index) => {
-                    let constant = chunk.read_constant(index);
+                chunk::OpCode::ConstantLong(index) => {
+                    let constant = frame.function.chunk.read_constant(index);
                     self.push_constant(constant);
                 }
                 chunk::OpCode::Return => {
-                    return Ok(());
+                    let result = self.stack.pop().ok_or_else(|| {
+                        Self::runtime_error(
+                            &frame,
+                            "Did not find required return value.",
+                            &self.call_stack,
+                        )
+                    })?;
+                    let return_frame = self.call_stack.pop();
+                    if let Some(fr) = return_frame {
+                        for _ in 0..frame.function.arity {
+                            self.stack.pop();
+                        }
+                        self.stack.pop();
+                        self.stack.push(result);
+                        frame = fr;
+                    } else {
+                        self.stack.pop();
+                        return Ok(());
+                    }
                 }
                 chunk::OpCode::Negate => {
                     if let Some(chunk::Value::Number(value)) = self.stack.pop() {
@@ -86,6 +104,7 @@ impl VM {
                         return Err(Self::runtime_error(
                             &frame,
                             "Tried to negate non-number value.",
+                            &self.call_stack,
                         ));
                     }
                 }
@@ -95,6 +114,7 @@ impl VM {
                     _ => Err(Self::runtime_error(
                         &frame,
                         "Tried to add two non-addable types",
+                        &self.call_stack,
                     ))?,
                 },
                 chunk::OpCode::Divide => self.binary_op(std::ops::Div::div, &frame)?,
@@ -110,6 +130,7 @@ impl VM {
                         return Err(Self::runtime_error(
                             &frame,
                             "Missing value to perform not operation.",
+                            &self.call_stack,
                         ));
                     }
                 }
@@ -118,6 +139,7 @@ impl VM {
                     _ => Err(Self::runtime_error(
                         &frame,
                         "Missing values when trying to compare for equality.",
+                        &self.call_stack,
                     ))?,
                 },
                 chunk::OpCode::Greater => {
@@ -130,6 +152,7 @@ impl VM {
                         _ => Err(Self::runtime_error(
                             &frame,
                             "Cannot compare greater two non-number operands.",
+                            &self.call_stack,
                         ))?,
                     }
                 }
@@ -143,6 +166,7 @@ impl VM {
                         _ => Err(Self::runtime_error(
                             &frame,
                             "Cannot compare less two non-number operands.",
+                            &self.call_stack,
                         ))?,
                     }
                 }
@@ -154,6 +178,7 @@ impl VM {
                         Err(Self::runtime_error(
                             &frame,
                             "Could not find a value to print.",
+                            &self.call_stack,
                         ))?;
                     }
                 }
@@ -161,39 +186,54 @@ impl VM {
                     self.stack.pop();
                 }
                 chunk::OpCode::DefineGlobal(index) => {
-                    if let chunk::Value::String(string) = chunk.read_constant(*index) {
+                    if let chunk::Value::String(string) = frame.function.chunk.read_constant(index)
+                    {
                         let value = self.stack.pop().ok_or_else(|| {
-                            Self::runtime_error(&frame, "Missing value for global variable.")
+                            Self::runtime_error(
+                                &frame,
+                                "Missing value for global variable.",
+                                &self.call_stack,
+                            )
                         })?;
                         self.globals.insert(Rc::clone(string), value);
                     } else {
                         Err(Self::runtime_error(
                             &frame,
                             "Name of variable was not a string.",
+                            &self.call_stack,
                         ))?;
                     }
                 }
                 chunk::OpCode::GetGlobal(index) => {
-                    if let chunk::Value::String(string) = chunk.read_constant(*index) {
+                    if let chunk::Value::String(string) = frame.function.chunk.read_constant(index)
+                    {
                         let value = self.globals.get(string).ok_or_else(|| {
-                            Self::runtime_error(&frame, "Could not read value for global variable.")
+                            Self::runtime_error(
+                                &frame,
+                                "Could not read value for global variable.",
+                                &self.call_stack,
+                            )
                         })?;
                         self.stack.push(value.clone());
                     } else {
                         Err(Self::runtime_error(
                             &frame,
                             "Name of variable was not a string",
+                            &self.call_stack,
                         ))?;
                     }
                 }
                 chunk::OpCode::SetGlobal(index) => {
-                    if let chunk::Value::String(string) = chunk.read_constant(*index) {
+                    if let chunk::Value::String(string) = frame.function.chunk.read_constant(index)
+                    {
                         let next = self.peek(0);
                         let value = match next {
                             Some(value) => value.clone(),
-                            None => {
-                                Err(Self::runtime_error(&frame, "No value to set for variable."))?
-                            }
+                            None => Err(Self::runtime_error(
+                                &frame,
+                                "No value to set for variable.",
+                                &self.call_stack,
+                            ))?,
                         };
                         let previous = self.globals.insert(Rc::clone(string), value);
                         if previous.is_none() {
@@ -201,30 +241,37 @@ impl VM {
                             Err(Self::runtime_error(
                                 &frame,
                                 "Cannot assign to an undefined variable.",
+                                &self.call_stack,
                             ))?;
                         }
                     } else {
                         Err(Self::runtime_error(
                             &frame,
                             "Name of variable was not a string",
+                            &self.call_stack,
                         ))?;
                     }
                 }
                 chunk::OpCode::GetLocal(index) => {
-                    let slot = *index + frame.stack_idx;
+                    let slot = index + frame.stack_idx;
                     let val = self.stack.get(slot).ok_or_else(|| {
-                        Self::runtime_error(&frame, "No value found in stack for local variable.")
+                        Self::runtime_error(
+                            &frame,
+                            "No value found in stack for local variable.",
+                            &self.call_stack,
+                        )
                     })?;
                     self.stack.push(val.clone());
                 }
                 chunk::OpCode::SetLocal(index) => {
-                    let slot = *index + frame.stack_idx;
+                    let slot = index + frame.stack_idx;
                     let val = self.peek(0);
                     let value = match val {
                         Some(value) => value.clone(),
                         None => Err(Self::runtime_error(
                             &frame,
                             "No value found in stack to set local variable to.",
+                            &self.call_stack,
                         ))?,
                     };
                     self.stack[slot] = value;
@@ -243,7 +290,29 @@ impl VM {
                 chunk::OpCode::Loop(jump_size) => {
                     frame.ip -= jump_size;
                 }
-                chunk::OpCode::Call(arg_count) => {}
+                chunk::OpCode::Call(arg_count) => {
+                    let callable = self.peek(arg_count);
+                    match callable {
+                        Some(chunk::Value::Function(func)) => {
+                            if func.arity != arg_count {
+                                return Err(Self::runtime_error(
+                                    &frame,
+                                    "Incorrect number of arguments provided.",
+                                    &self.call_stack,
+                                ));
+                            }
+                            let new_frame =
+                                CallFrame::new(&Rc::clone(func), self.stack.len() - arg_count);
+                            let old_frame = mem::replace(&mut frame, new_frame);
+                            self.call_stack.push(old_frame);
+                        }
+                        _ => Err(Self::runtime_error(
+                            &frame,
+                            "Provided object was not callable.",
+                            &self.call_stack,
+                        ))?,
+                    }
+                }
             }
         }
     }
@@ -266,6 +335,7 @@ impl VM {
             _ => Err(Self::runtime_error(
                 frame,
                 "Operands were missing or incorrect to binary operation.",
+                &self.call_stack,
             )),
         }
     }
@@ -289,6 +359,7 @@ impl VM {
             _ => Err(Self::runtime_error(
                 frame,
                 "Operand was missing or incorrect in string concatenation.",
+                &self.call_stack,
             )),
         }
     }
@@ -302,12 +373,22 @@ impl VM {
             .disassemble_instruction(frame.ip, instruction);
     }
 
-    fn runtime_error(frame: &CallFrame, message: &'static str) -> Error {
+    fn runtime_error(frame: &CallFrame, message: &'static str, stack: &[CallFrame]) -> Error {
         eprintln!(
             "[Line {}] Error in script: {}",
             frame.function.chunk.get_line(frame.ip),
             message
         );
+        for lower_frame in stack.iter().rev() {
+            let name = if lower_frame.function.name.is_empty() {
+                "script"
+            } else {
+                &lower_frame.function.name
+            };
+            let line = lower_frame.function.chunk.get_line(lower_frame.ip);
+            eprintln!("[Line {line}] in {name}");
+        }
+
         Error::RuntimeError(message)
     }
 }

@@ -30,6 +30,7 @@ impl Display for Function {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum FunctionType {
     Function,
     Script,

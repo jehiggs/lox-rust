@@ -38,7 +38,7 @@ impl<'a> Compiler<'a> {
         while self.peek().is_some() {
             result = result.and(self.declaration());
         }
-
+        self.end_function();
         if self.scanner.next().is_some() {
             return Err(Self::error("Compiler failed to parse all code in source."));
         }
@@ -221,6 +221,7 @@ impl<'a> Compiler<'a> {
         )?;
         self.block()?;
 
+        self.end_function();
         let function = mem::replace(&mut self.function, old_fn);
         self.end_scope(0); // TODO.
         self.function_type = old_fn_type;
@@ -228,6 +229,11 @@ impl<'a> Compiler<'a> {
             .chunk
             .write_constant_instruction(chunk::Value::Function(Rc::from(function)), 0); // TODO
         Ok(())
+    }
+
+    fn end_function(&mut self) {
+        self.function.chunk.write_chunk(chunk::OpCode::Nil, 0); // TODO
+        self.function.chunk.write_chunk(chunk::OpCode::Return, 0); // TODO
     }
 
     fn statement(&mut self) -> Result<(), Error> {
@@ -243,6 +249,7 @@ impl<'a> Compiler<'a> {
             Some(scanner::TokenType::If) => self.if_statement(),
             Some(scanner::TokenType::While) => self.while_statement(),
             Some(scanner::TokenType::For) => self.for_statement(),
+            Some(scanner::TokenType::Return) => self.return_statement(),
             _ => self.expression_statement(),
         }
     }
@@ -428,6 +435,32 @@ impl<'a> Compiler<'a> {
             self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
         }
         self.end_scope(line);
+        Ok(())
+    }
+
+    fn return_statement(&mut self) -> Result<(), Error> {
+        if self.function_type == object::FunctionType::Script {
+            return Err(Self::error("Cannot return from a top level script."));
+        }
+        self.consume(
+            mem::discriminant(&scanner::TokenType::Return),
+            "Require a 'return' keyword to parse a return statement.",
+        )?;
+        let next = self
+            .advance()
+            .ok_or_else(|| Self::error("Expect a token when parsing a return"))?;
+        if next.token_type == scanner::TokenType::Semicolon {
+            self.end_function();
+        } else {
+            self.expression()?;
+            self.consume(
+                mem::discriminant(&scanner::TokenType::Semicolon),
+                "Expect a ';' at the end of a return statement.",
+            )?;
+            self.function
+                .chunk
+                .write_chunk(chunk::OpCode::Return, next.line);
+        }
         Ok(())
     }
 
@@ -1094,6 +1127,7 @@ mod tests {
                 OpCode::Constant(1),
                 OpCode::Subtract,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -1112,6 +1146,7 @@ mod tests {
                 OpCode::Constant(2),
                 OpCode::Add,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::Number(1.0),
@@ -1134,6 +1169,7 @@ mod tests {
                 OpCode::Divide,
                 OpCode::Add,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::Number(1.0),
@@ -1149,7 +1185,12 @@ mod tests {
         let chunk = compile(source);
         check_chunk(
             &chunk,
-            &[OpCode::Constant(0), OpCode::Negate, OpCode::Pop],
+            &[
+                OpCode::Constant(0),
+                OpCode::Negate,
+                OpCode::Pop,
+                OpCode::Nil,
+            ],
             &[chunk::Value::Number(1.0)],
         );
     }
@@ -1166,6 +1207,7 @@ mod tests {
                 OpCode::Constant(1),
                 OpCode::Add,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -1184,6 +1226,7 @@ mod tests {
                 OpCode::Constant(2),
                 OpCode::Multiply,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::Number(1.0),
@@ -1208,6 +1251,7 @@ mod tests {
                 OpCode::Multiply,
                 OpCode::Add,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::Number(1.0),
@@ -1261,35 +1305,43 @@ mod tests {
     fn true_value() {
         let source = "true;";
         let chunk = compile(source);
-        check_chunk(&chunk, &[OpCode::True, OpCode::Pop], &[]);
+        check_chunk(&chunk, &[OpCode::True, OpCode::Pop, OpCode::Nil], &[]);
     }
 
     #[test]
     fn false_value() {
         let source = "false;";
         let chunk = compile(source);
-        check_chunk(&chunk, &[OpCode::False, OpCode::Pop], &[]);
+        check_chunk(&chunk, &[OpCode::False, OpCode::Pop, OpCode::Nil], &[]);
     }
 
     #[test]
     fn nil_value() {
         let source = "nil;";
         let chunk = compile(source);
-        check_chunk(&chunk, &[OpCode::Nil, OpCode::Pop], &[]);
+        check_chunk(&chunk, &[OpCode::Nil, OpCode::Pop, OpCode::Nil], &[]);
     }
 
     #[test]
     fn not_operation() {
         let source = "!true;";
         let chunk = compile(source);
-        check_chunk(&chunk, &[OpCode::True, OpCode::Not, OpCode::Pop], &[]);
+        check_chunk(
+            &chunk,
+            &[OpCode::True, OpCode::Not, OpCode::Pop, OpCode::Nil],
+            &[],
+        );
     }
 
     #[test]
     fn negate_non_number() {
         let source = "-false;";
         let chunk = compile(source);
-        check_chunk(&chunk, &[OpCode::False, OpCode::Negate, OpCode::Pop], &[]);
+        check_chunk(
+            &chunk,
+            &[OpCode::False, OpCode::Negate, OpCode::Pop, OpCode::Nil],
+            &[],
+        );
     }
 
     #[test]
@@ -1303,6 +1355,7 @@ mod tests {
                 OpCode::Constant(1),
                 OpCode::Equal,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -1321,6 +1374,7 @@ mod tests {
                 OpCode::Constant(2),
                 OpCode::Greater,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::Number(1.0),
@@ -1342,6 +1396,7 @@ mod tests {
                 OpCode::Less,
                 OpCode::Not,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -1359,6 +1414,7 @@ mod tests {
                 OpCode::Greater,
                 OpCode::Not,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -1376,6 +1432,7 @@ mod tests {
                 OpCode::Equal,
                 OpCode::Not,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(1.0), chunk::Value::Number(2.0)],
         );
@@ -1387,7 +1444,7 @@ mod tests {
         let chunk = compile(source);
         check_chunk(
             &chunk,
-            &[OpCode::Constant(0), OpCode::Pop],
+            &[OpCode::Constant(0), OpCode::Pop, OpCode::Nil],
             &[chunk::Value::String(Rc::from(String::from("foo")))],
         );
     }
@@ -1403,6 +1460,7 @@ mod tests {
                 OpCode::Constant(1),
                 OpCode::Add,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::Number(1.0),
@@ -1422,6 +1480,7 @@ mod tests {
                 OpCode::DefineGlobal(0),
                 OpCode::GetGlobal(2),
                 OpCode::Print,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::String(Rc::from(String::from("foo"))),
@@ -1442,6 +1501,7 @@ mod tests {
                 OpCode::DefineGlobal(0),
                 OpCode::GetGlobal(1),
                 OpCode::Print,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::String(Rc::from(String::from("foo"))),
@@ -1471,6 +1531,7 @@ mod tests {
                 OpCode::GetGlobal(3),
                 OpCode::Add,
                 OpCode::Print,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::String(Rc::from(String::from("foo"))),
@@ -1501,6 +1562,7 @@ mod tests {
                 OpCode::Constant(2),
                 OpCode::SetGlobal(1),
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::String(Rc::from(String::from("foo"))),
@@ -1529,6 +1591,7 @@ mod tests {
                 OpCode::GetLocal(0),
                 OpCode::Print,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(10.)],
         );
@@ -1548,6 +1611,7 @@ mod tests {
                 OpCode::GetLocal(0),
                 OpCode::Print,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(10.), chunk::Value::Number(20.)],
         );
@@ -1568,6 +1632,7 @@ mod tests {
                 OpCode::GetLocal(0),
                 OpCode::Print,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(10.), chunk::Value::Number(20.)],
         );
@@ -1606,6 +1671,7 @@ mod tests {
                 OpCode::Print,
                 OpCode::Jump(1),
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::String(Rc::from(String::from("no")))],
         );
@@ -1629,6 +1695,7 @@ mod tests {
                 OpCode::Print,
                 OpCode::Jump(1),
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::String(Rc::from(String::from("no")))],
         );
@@ -1648,6 +1715,7 @@ mod tests {
                 OpCode::Print,
                 OpCode::Loop(6),
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[chunk::Value::Number(1.)],
         );
@@ -1678,6 +1746,7 @@ mod tests {
                 OpCode::Loop(9),
                 OpCode::Pop,
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::Number(0.),
@@ -1712,6 +1781,7 @@ mod tests {
                 OpCode::Print,
                 OpCode::Loop(9),
                 OpCode::Pop,
+                OpCode::Nil,
             ],
             &[
                 chunk::Value::String(Rc::from(String::from("j"))),

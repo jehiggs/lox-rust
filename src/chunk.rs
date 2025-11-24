@@ -33,7 +33,7 @@ impl fmt::Display for Value {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum OpCode {
     Add,
     Call(usize),
