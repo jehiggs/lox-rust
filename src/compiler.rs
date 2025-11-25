@@ -197,7 +197,7 @@ impl<'a> Compiler<'a> {
         let old_fn = mem::replace(&mut self.function, object::Function::new(name));
         let old_fn_type = mem::replace(&mut self.function_type, function_type);
         self.begin_scope();
-        self.consume(
+        let line = self.consume(
             mem::discriminant(&scanner::TokenType::LeftParen),
             "Expect '(' after function name.",
         )?;
@@ -206,8 +206,9 @@ impl<'a> Compiler<'a> {
             if self.function.arity > 255 {
                 return Err(Self::error("Over 255 function parameters provided."));
             }
+            let param_line = self.peek().map_or(line, |token| token.line);
             let constant = self.parse_variable("Expected a parameter name.")?;
-            self.define_variable(constant, 0); // TODO.
+            self.define_variable(constant, param_line);
             if !self.check(mem::discriminant(&scanner::TokenType::RightParen)) {
                 self.consume(
                     mem::discriminant(&scanner::TokenType::Comma),
@@ -227,13 +228,14 @@ impl<'a> Compiler<'a> {
         self.function_type = old_fn_type;
         self.function
             .chunk
-            .write_constant_instruction(chunk::Value::Function(Rc::from(function)), 0); // TODO
+            .write_constant_instruction(chunk::Value::Function(Rc::from(function)), line);
         Ok(())
     }
 
     fn end_function(&mut self) {
-        self.function.chunk.write_chunk(chunk::OpCode::Nil, 0); // TODO
-        self.function.chunk.write_chunk(chunk::OpCode::Return, 0); // TODO
+        let line = self.peek().map_or(0, |token| token.line);
+        self.function.chunk.write_chunk(chunk::OpCode::Nil, line);
+        self.function.chunk.write_chunk(chunk::OpCode::Return, line);
     }
 
     fn statement(&mut self) -> Result<(), Error> {
