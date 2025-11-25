@@ -558,6 +558,18 @@ mod tests {
         test_valid(source);
     }
 
+    #[test]
+    fn function_call() {
+        let source = "fun add(a, b) { return a + b; } add(1, 2);";
+        test_valid(source);
+    }
+
+    #[test]
+    fn wrong_arg_count() {
+        let source = "fun add(a, b) { return a + b; } add(1);";
+        test_invalid(source);
+    }
+
     fn test_valid(source: &str) {
         let mut vm = VM::new();
         let result = vm.interpret(source);

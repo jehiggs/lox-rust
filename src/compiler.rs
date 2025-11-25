@@ -222,8 +222,8 @@ impl<'a> Compiler<'a> {
         self.block()?;
 
         self.end_function();
-        let function = mem::replace(&mut self.function, old_fn);
         self.end_scope(0); // TODO.
+        let function = mem::replace(&mut self.function, old_fn);
         self.function_type = old_fn_type;
         self.function
             .chunk
@@ -1811,19 +1811,103 @@ mod tests {
     #[test]
     fn function_declaration() {
         let source = "fun areWeHavingIt() { print 1; } print areWeHavingIt;";
-        compile(source);
+        let chunk = compile(source);
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(1),
+                OpCode::DefineGlobal(0),
+                OpCode::GetGlobal(2),
+                OpCode::Print,
+                OpCode::Nil,
+            ],
+            &[
+                test_string("areWeHavingIt"),
+                test_function("areWeHavingIt", 0),
+                test_string("areWeHavingIt"),
+            ],
+        );
+        let function = extract_function(&chunk, 1);
+        check_chunk(
+            &function.chunk,
+            &[
+                OpCode::Constant(0),
+                OpCode::Print,
+                OpCode::Nil,
+                OpCode::Return,
+            ],
+            &[chunk::Value::Number(1.)],
+        );
+    }
+
+    #[test]
+    fn call_with_return() {
+        let source = "fun add(a, b) { return a + b; } add(1, 2);";
+        let chunk = compile(source);
+        check_chunk(
+            &chunk,
+            &[
+                OpCode::Constant(1),
+                OpCode::DefineGlobal(0),
+                OpCode::GetGlobal(2),
+                OpCode::Constant(3),
+                OpCode::Constant(4),
+                OpCode::Call(2),
+                OpCode::Pop,
+                OpCode::Nil,
+                OpCode::Return,
+            ],
+            &[
+                test_string("add"),
+                test_function("add", 2),
+                test_string("add"),
+                chunk::Value::Number(1.),
+                chunk::Value::Number(2.),
+            ],
+        );
     }
 
     fn check_chunk(chunk: &Chunk, opcodes: &[OpCode], constants: &[Value]) {
         for (index, opcode) in opcodes.iter().enumerate() {
             assert_eq!(opcode, chunk.read_code(index));
             if let OpCode::Constant(const_index) = opcode {
-                assert_eq!(
-                    constants[usize::from(*const_index)],
-                    *chunk.read_constant((*const_index).into())
-                );
+                let left = &constants[usize::from(*const_index)];
+                match left {
+                    chunk::Value::Function(func) => {
+                        let chunk::Value::Function(rfunc) =
+                            chunk.read_constant((*const_index).into())
+                        else {
+                            panic!("Both sides should be functions.")
+                        };
+                        assert_eq!(func.name, rfunc.name);
+                        assert_eq!(func.arity, rfunc.arity);
+                    }
+                    _ => {
+                        assert_eq!(
+                            constants[usize::from(*const_index)],
+                            *chunk.read_constant((*const_index).into())
+                        );
+                    }
+                }
             }
         }
         assert_eq!(OpCode::Return, *chunk.read_code(opcodes.len()));
+    }
+
+    fn test_function(name: &str, arity: usize) -> chunk::Value {
+        let mut function = object::Function::new(name);
+        function.arity = arity;
+        chunk::Value::Function(Rc::from(function))
+    }
+
+    fn test_string(value: &str) -> chunk::Value {
+        chunk::Value::String(Rc::from(String::from(value)))
+    }
+
+    fn extract_function(chunk: &Chunk, index: usize) -> &object::Function {
+        match chunk.read_constant(index) {
+            chunk::Value::Function(func) => func,
+            _ => panic!("Did not get a function where expected."),
+        }
     }
 }
