@@ -446,20 +446,22 @@ impl<'a> Compiler<'a> {
             mem::discriminant(&scanner::TokenType::Return),
             "Require a 'return' keyword to parse a return statement.",
         )?;
-        let next = self
-            .advance()
-            .ok_or_else(|| Self::error("Expect a token when parsing a return"))?;
-        if next.token_type == scanner::TokenType::Semicolon {
-            self.end_function();
-        } else {
-            self.expression()?;
-            self.consume(
-                mem::discriminant(&scanner::TokenType::Semicolon),
-                "Expect a ';' at the end of a return statement.",
-            )?;
-            self.function
-                .chunk
-                .write_chunk(chunk::OpCode::Return, next.line);
+        match self.peek().map(|token| &token.token_type) {
+            Some(scanner::TokenType::Semicolon) => {
+                self.advance();
+                self.end_function();
+            }
+            Some(_) => {
+                self.expression()?;
+                let line = self.consume(
+                    mem::discriminant(&scanner::TokenType::Semicolon),
+                    "Expect a ';' at the end of a return statement.",
+                )?;
+                self.function.chunk.write_chunk(chunk::OpCode::Return, line);
+            }
+            None => {
+                return Err(Self::error("Expect a token when parsing a return"));
+            }
         }
         Ok(())
     }
@@ -756,19 +758,29 @@ impl<'a> Compiler<'a> {
     }
 
     fn resolve_local(&mut self, token: &scanner::Token<'a>) -> Result<Option<usize>, Error> {
+        let token_name = Self::extract_name(token)?;
         for (index, item) in self.locals[0..self.local_count].iter().enumerate().rev() {
-            if let Some(local) = item
-                && *local.name() == *token
-            {
-                match local {
-                    Local::Initialized(_, _) => return Ok(Some(index)),
-                    Local::Uninitialized(_) => {
-                        return Err(Self::error("Can't read variable in its own initializer."));
+            if let Some(local) = item {
+                let local_name = Self::extract_name(local.name())?;
+                if token_name == local_name {
+                    match local {
+                        Local::Initialized(_, _) => return Ok(Some(index)),
+                        Local::Uninitialized(_) => {
+                            return Err(Self::error("Can't read variable in its own initializer."));
+                        }
                     }
                 }
             }
         }
         Ok(None)
+    }
+
+    fn extract_name(token: &scanner::Token<'a>) -> Result<&'a str, Error> {
+        if let scanner::TokenType::Identifier(ident) = token.token_type {
+            Ok(ident)
+        } else {
+            Err(Self::report_error(token, "Token should be an identifier."))
+        }
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) -> Result<(), Error> {

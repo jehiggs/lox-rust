@@ -1,4 +1,5 @@
 use crate::object::Function;
+use crate::object::NativeFunction;
 use std::fmt;
 use std::rc::Rc;
 
@@ -9,13 +10,14 @@ pub enum Value {
     Nil,
     String(Rc<str>),
     Function(Rc<Function>),
+    Native(NativeFunction),
 }
 
 impl Value {
     pub fn is_falsey(&self) -> bool {
         match self {
             Value::Bool(value) => !value,
-            Value::Number(_) | Value::String(_) | Value::Function(_) => false,
+            Value::Number(_) | Value::String(_) | Value::Function(_) | Value::Native(_) => false,
             Value::Nil => true,
         }
     }
@@ -29,6 +31,7 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::String(string) => write!(f, "{string}"),
             Value::Function(func) => write!(f, "{func}"),
+            Value::Native(_) => write!(f, "<native function>"),
         }
     }
 }
@@ -126,6 +129,17 @@ impl Chunk {
             self.disassemble_instruction(i, code);
         }
         println!("== END CHUNK ==\n\n");
+
+        for function in self.constants.iter().filter_map(|constant| {
+            if let Value::Function(func) = constant {
+                Some(func)
+            } else {
+                None
+            }
+        }) {
+            let name = &function.name;
+            function.chunk.disassemble_chunk(name);
+        }
     }
 
     #[cfg(debug_assertions)]

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::chunk;
 use crate::compiler;
@@ -22,12 +23,14 @@ pub struct VM {
 
 impl VM {
     pub fn new() -> Self {
-        VM {
+        let mut vm = VM {
             stack: Vec::with_capacity(STACK_SIZE),
             strings: HashSet::with_capacity(TABLE_SIZE),
             globals: HashMap::with_capacity(TABLE_SIZE),
             call_stack: Vec::with_capacity(FRAME_SIZE),
-        }
+        };
+        vm.define_native("clock", Self::clock_native);
+        vm
     }
 
     pub fn interpret(&mut self, source: &str) -> Result<(), Error> {
@@ -306,6 +309,15 @@ impl VM {
                             let old_frame = mem::replace(&mut frame, new_frame);
                             self.call_stack.push(old_frame);
                         }
+                        Some(chunk::Value::Native(func)) => {
+                            let result =
+                                func(arg_count, &self.stack[self.stack.len() - arg_count..]);
+                            for _ in 0..arg_count {
+                                self.stack.pop();
+                            }
+                            self.stack.pop();
+                            self.stack.push(result);
+                        }
                         _ => Err(Self::runtime_error(
                             &frame,
                             "Provided object was not callable.",
@@ -366,7 +378,11 @@ impl VM {
 
     #[cfg(debug_assertions)]
     fn debug_instruction(&self, frame: &CallFrame, instruction: &chunk::OpCode) {
-        println!("{:?}", self.stack);
+        print!("[");
+        for item in &self.stack {
+            print!("{item}, ");
+        }
+        println!("]");
         frame
             .function
             .chunk
@@ -390,6 +406,22 @@ impl VM {
         }
 
         Error::RuntimeError(message)
+    }
+
+    fn define_native(&mut self, name: &str, func: object::NativeFunction) {
+        let name_str = Rc::from(String::from(name));
+        self.globals
+            .insert(Rc::clone(&name_str), chunk::Value::Native(func));
+        self.strings.insert(name_str);
+    }
+
+    fn clock_native(_: usize, _: &[chunk::Value]) -> chunk::Value {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Clock should tick forwards.")
+            .as_secs();
+        #[allow(clippy::cast_precision_loss)]
+        chunk::Value::Number(now as f64)
     }
 }
 

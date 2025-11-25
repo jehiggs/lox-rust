@@ -42,5 +42,6 @@ fn repl(mut vm: vm::VM) -> Result<(), String> {
 
 fn run_file(mut vm: vm::VM, file: &str) -> Result<(), String> {
     let content = fs::read_to_string(file).map_err(|err| err.to_string())?;
+    println!("{content}");
     vm.interpret(&content).map_err(|err| format!("{err:?}"))
 }

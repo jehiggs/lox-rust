@@ -35,3 +35,5 @@ pub enum FunctionType {
     Function,
     Script,
 }
+
+pub type NativeFunction = fn(usize, &[chunk::Value]) -> chunk::Value;
