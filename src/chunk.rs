@@ -3,7 +3,7 @@ use crate::object::NativeFunction;
 use std::fmt;
 use std::rc::Rc;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Bool(bool),
     Number(f64),
@@ -32,6 +32,21 @@ impl fmt::Display for Value {
             Value::String(string) => write!(f, "{string}"),
             Value::Function(func) => write!(f, "{func}"),
             Value::Native(_) => write!(f, "<native function>"),
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
+            (Self::Number(l0), Self::Number(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::Function(l0), Self::Function(r0)) => l0 == r0,
+            // As Lox only supports one native function, if both things are natives they are the same.
+            // This works around comparing function pointers.
+            (Self::Native(_), Self::Native(_)) => true,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
 }
