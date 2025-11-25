@@ -4,3 +4,27 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = "warn"
+assertions_on_result_states = "warn"
+cfg_not_test = "warn"
+clone_on_ref_ptr = "warn"
+deref_by_slicing = "warn"
+fn_to_numeric_cast_any = "warn"
+get_unwrap = "warn"
+if_then_some_else_none = "warn"
+infinite_loop = "warn"
+map_with_unused_arguments_over_ranges = "warn"
+rc_buffer = "warn"
+redundant_test_prefix = "warn"
+same_name_method = "warn"
+semicolon_inside_block = "warn"
+shadow_unrelated = "warn"
+str_to_string = "warn"
+tests_outside_test_module = "warn"
+try_err = "warn"
+unused_result_ok = "warn"
+unwrap_in_result = "warn"
+unwrap_used = "warn"

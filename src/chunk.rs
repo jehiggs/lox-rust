@@ -15,7 +15,7 @@ pub enum Value {
 
 impl Value {
     pub fn is_falsey(&self) -> bool {
-        match self {
+        match *self {
             Value::Bool(value) => !value,
             Value::Number(_) | Value::String(_) | Value::Function(_) | Value::Native(_) => false,
             Value::Nil => true,
@@ -25,12 +25,12 @@ impl Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
             Value::Bool(flag) => write!(f, "{flag}"),
             Value::Number(number) => write!(f, "{number}"),
             Value::Nil => write!(f, "nil"),
-            Value::String(string) => write!(f, "{string}"),
-            Value::Function(func) => write!(f, "{func}"),
+            Value::String(ref string) => write!(f, "{string}"),
+            Value::Function(ref func) => write!(f, "{func}"),
             Value::Native(_) => write!(f, "<native function>"),
         }
     }
@@ -152,8 +152,8 @@ impl Chunk {
                 None
             }
         }) {
-            let name = &function.name;
-            function.chunk.disassemble_chunk(name);
+            let func_name = &function.name;
+            function.chunk.disassemble_chunk(func_name);
         }
     }
 
@@ -281,7 +281,13 @@ mod tests {
             chunk.write_constant_instruction(number, 0);
         }
         chunk.write_constant_instruction(Value::Number(123.into()), 0);
-        assert_eq!(OpCode::ConstantLong(300), *chunk.code.last().unwrap());
+        assert_eq!(
+            OpCode::ConstantLong(300),
+            *chunk
+                .code
+                .last()
+                .expect("Should have a code value in vector.")
+        );
     }
 
     #[test]

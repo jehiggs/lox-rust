@@ -114,11 +114,13 @@ impl VM {
                 chunk::OpCode::Add => match self.peek(0) {
                     Some(chunk::Value::String(_)) => self.concatenate(&frame)?,
                     Some(chunk::Value::Number(_)) => self.binary_op(std::ops::Add::add, &frame)?,
-                    _ => Err(Self::runtime_error(
-                        &frame,
-                        "Tried to add two non-addable types",
-                        &self.call_stack,
-                    ))?,
+                    _ => {
+                        return Err(Self::runtime_error(
+                            &frame,
+                            "Tried to add two non-addable types",
+                            &self.call_stack,
+                        ));
+                    }
                 },
                 chunk::OpCode::Divide => self.binary_op(std::ops::Div::div, &frame)?,
                 chunk::OpCode::Multiply => self.binary_op(std::ops::Mul::mul, &frame)?,
@@ -139,11 +141,13 @@ impl VM {
                 }
                 chunk::OpCode::Equal => match (self.stack.pop(), self.stack.pop()) {
                     (Some(a), Some(b)) => self.stack.push(chunk::Value::Bool(a == b)),
-                    _ => Err(Self::runtime_error(
-                        &frame,
-                        "Missing values when trying to compare for equality.",
-                        &self.call_stack,
-                    ))?,
+                    _ => {
+                        return Err(Self::runtime_error(
+                            &frame,
+                            "Missing values when trying to compare for equality.",
+                            &self.call_stack,
+                        ));
+                    }
                 },
                 chunk::OpCode::Greater => {
                     let a = self.stack.pop();
@@ -152,11 +156,13 @@ impl VM {
                         (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
                             self.stack.push(chunk::Value::Bool(i > j));
                         }
-                        _ => Err(Self::runtime_error(
-                            &frame,
-                            "Cannot compare greater two non-number operands.",
-                            &self.call_stack,
-                        ))?,
+                        _ => {
+                            return Err(Self::runtime_error(
+                                &frame,
+                                "Cannot compare greater two non-number operands.",
+                                &self.call_stack,
+                            ));
+                        }
                     }
                 }
                 chunk::OpCode::Less => {
@@ -166,11 +172,13 @@ impl VM {
                         (Some(chunk::Value::Number(i)), Some(chunk::Value::Number(j))) => {
                             self.stack.push(chunk::Value::Bool(i < j));
                         }
-                        _ => Err(Self::runtime_error(
-                            &frame,
-                            "Cannot compare less two non-number operands.",
-                            &self.call_stack,
-                        ))?,
+                        _ => {
+                            return Err(Self::runtime_error(
+                                &frame,
+                                "Cannot compare less two non-number operands.",
+                                &self.call_stack,
+                            ));
+                        }
                     }
                 }
                 chunk::OpCode::Print => {
@@ -178,11 +186,11 @@ impl VM {
                     if let Some(value) = item {
                         println!("{value}");
                     } else {
-                        Err(Self::runtime_error(
+                        return Err(Self::runtime_error(
                             &frame,
                             "Could not find a value to print.",
                             &self.call_stack,
-                        ))?;
+                        ));
                     }
                 }
                 chunk::OpCode::Pop => {
@@ -200,11 +208,11 @@ impl VM {
                         })?;
                         self.globals.insert(Rc::clone(string), value);
                     } else {
-                        Err(Self::runtime_error(
+                        return Err(Self::runtime_error(
                             &frame,
                             "Name of variable was not a string.",
                             &self.call_stack,
-                        ))?;
+                        ));
                     }
                 }
                 chunk::OpCode::GetGlobal(index) => {
@@ -219,11 +227,11 @@ impl VM {
                         })?;
                         self.stack.push(value.clone());
                     } else {
-                        Err(Self::runtime_error(
+                        return Err(Self::runtime_error(
                             &frame,
                             "Name of variable was not a string",
                             &self.call_stack,
-                        ))?;
+                        ));
                     }
                 }
                 chunk::OpCode::SetGlobal(index) => {
@@ -232,27 +240,29 @@ impl VM {
                         let next = self.peek(0);
                         let value = match next {
                             Some(value) => value.clone(),
-                            None => Err(Self::runtime_error(
-                                &frame,
-                                "No value to set for variable.",
-                                &self.call_stack,
-                            ))?,
+                            None => {
+                                return Err(Self::runtime_error(
+                                    &frame,
+                                    "No value to set for variable.",
+                                    &self.call_stack,
+                                ));
+                            }
                         };
                         let previous = self.globals.insert(Rc::clone(string), value);
                         if previous.is_none() {
                             self.globals.remove(string);
-                            Err(Self::runtime_error(
+                            return Err(Self::runtime_error(
                                 &frame,
                                 "Cannot assign to an undefined variable.",
                                 &self.call_stack,
-                            ))?;
+                            ));
                         }
                     } else {
-                        Err(Self::runtime_error(
+                        return Err(Self::runtime_error(
                             &frame,
                             "Name of variable was not a string",
                             &self.call_stack,
-                        ))?;
+                        ));
                     }
                 }
                 chunk::OpCode::GetLocal(index) => {
@@ -271,11 +281,13 @@ impl VM {
                     let val = self.peek(0);
                     let value = match val {
                         Some(value) => value.clone(),
-                        None => Err(Self::runtime_error(
-                            &frame,
-                            "No value found in stack to set local variable to.",
-                            &self.call_stack,
-                        ))?,
+                        None => {
+                            return Err(Self::runtime_error(
+                                &frame,
+                                "No value found in stack to set local variable to.",
+                                &self.call_stack,
+                            ));
+                        }
                     };
                     self.stack[slot] = value;
                 }
@@ -311,18 +323,20 @@ impl VM {
                         }
                         Some(chunk::Value::Native(func)) => {
                             let result =
-                                func(arg_count, &self.stack[self.stack.len() - arg_count..]);
+                                func(arg_count, &self.stack[self.stack.len() - arg_count..])?;
                             for _ in 0..arg_count {
                                 self.stack.pop();
                             }
                             self.stack.pop();
                             self.stack.push(result);
                         }
-                        _ => Err(Self::runtime_error(
-                            &frame,
-                            "Provided object was not callable.",
-                            &self.call_stack,
-                        ))?,
+                        _ => {
+                            return Err(Self::runtime_error(
+                                &frame,
+                                "Provided object was not callable.",
+                                &self.call_stack,
+                            ));
+                        }
                     }
                 }
             }
@@ -358,10 +372,10 @@ impl VM {
         match (b, a) {
             (Some(chunk::Value::String(prefix)), Some(chunk::Value::String(suffix))) => {
                 let string = format!("{prefix}{suffix}");
-                let new = if let Some(item) = self.strings.get(&string[..]) {
+                let new = if let Some(item) = self.strings.get(&*string) {
                     Rc::clone(item)
                 } else {
-                    let item = Rc::from(&string[..]);
+                    let item = Rc::from(&*string);
                     self.strings.insert(Rc::clone(&item));
                     item
                 };
@@ -415,13 +429,13 @@ impl VM {
         self.strings.insert(name_str);
     }
 
-    fn clock_native(_: usize, _: &[chunk::Value]) -> chunk::Value {
+    fn clock_native(_: usize, _: &[chunk::Value]) -> Result<chunk::Value, Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("Clock should tick forwards.")
+            .map_err(|_| Error::RuntimeError("Clock should always tick forward"))?
             .as_secs();
         #[allow(clippy::cast_precision_loss)]
-        chunk::Value::Number(now as f64)
+        Ok(chunk::Value::Number(now as f64))
     }
 }
 

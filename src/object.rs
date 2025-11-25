@@ -1,4 +1,4 @@
-use crate::chunk;
+use crate::{chunk, error::Error};
 
 use std::fmt::Display;
 
@@ -36,4 +36,4 @@ pub enum FunctionType {
     Script,
 }
 
-pub type NativeFunction = fn(usize, &[chunk::Value]) -> chunk::Value;
+pub type NativeFunction = fn(usize, &[chunk::Value]) -> Result<chunk::Value, Error>;

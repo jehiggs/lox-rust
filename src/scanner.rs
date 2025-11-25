@@ -112,7 +112,14 @@ impl<'a> Scanner<'a> {
         let idx = self.number_end_index();
         let number = &self.source[0..idx];
         self.source = &self.source[idx..];
-        Token::new(self.line, TokenType::Number(number.parse::<f64>().unwrap()))
+        Token::new(
+            self.line,
+            TokenType::Number(
+                number
+                    .parse::<f64>()
+                    .expect("Unable to convert numeric to f64."),
+            ),
+        )
     }
 
     fn parse_identifier(&mut self) -> Token<'a> {

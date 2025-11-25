@@ -1,5 +1,3 @@
-#![warn(clippy::pedantic)]
-
 mod chunk;
 mod compiler;
 mod error;

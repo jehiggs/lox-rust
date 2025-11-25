@@ -381,7 +381,9 @@ impl<'a> Compiler<'a> {
                 self.advance();
             }
             Some(_) => self.expression_statement()?,
-            None => Err(Self::error("Required a token in a for loop."))?,
+            None => {
+                return Err(Self::error("Required a token in a for loop."));
+            }
         }
         let mut loop_start = self.function.chunk.code_len();
 
@@ -400,9 +402,11 @@ impl<'a> Compiler<'a> {
                     .write_chunk(chunk::OpCode::Pop, for_line);
                 Some(exit_jump)
             }
-            None => Err(Self::error(
-                "Required a token while parsing the guard in a 'for' loop.",
-            ))?,
+            None => {
+                return Err(Self::error(
+                    "Required a token while parsing the guard in a 'for' loop.",
+                ));
+            }
         };
 
         // Increment
@@ -419,9 +423,11 @@ impl<'a> Compiler<'a> {
                 loop_start = increment_start;
                 self.patch_jump(body_jump)?;
             }
-            None => Err(Self::error(
-                "Required a token while parsing the increment in a 'for' loop.",
-            ))?,
+            None => {
+                return Err(Self::error(
+                    "Required a token while parsing the increment in a 'for' loop.",
+                ));
+            }
         }
         self.consume(
             mem::discriminant(&scanner::TokenType::RightParen),
@@ -728,12 +734,11 @@ impl<'a> Compiler<'a> {
         token: &scanner::Token<'a>,
         can_assign: bool,
     ) -> Result<(), Error> {
-        let ident = match token.token_type {
-            scanner::TokenType::Identifier(ident) => ident,
-            _ => Err(Self::report_error(
+        let scanner::TokenType::Identifier(ident) = token.token_type else {
+            return Err(Self::report_error(
                 token,
                 "Did not get identifier when reading variable.",
-            ))?,
+            ));
         };
         let (get_op, set_op) = if let Some(index) = self.resolve_local(token)? {
             (
@@ -804,7 +809,7 @@ impl<'a> Compiler<'a> {
             }
 
             if can_assign && self.match_token(mem::discriminant(&scanner::TokenType::Equal)) {
-                Err(Self::error("Invalid assignment target"))?;
+                return Err(Self::error("Invalid assignment target"));
             }
         }
         Ok(())
@@ -848,10 +853,10 @@ impl<'a> Compiler<'a> {
                     Some(Local::Initialized(depth, _)) if *depth < self.scope_depth => break,
                     Some(local) => {
                         if *local.name() == token {
-                            Err(Self::report_error(
+                            return Err(Self::report_error(
                                 &token,
                                 "Attempted to redeclare a variable in the same scope.",
-                            ))?;
+                            ));
                         }
                     }
                     None => break,
@@ -1030,7 +1035,7 @@ impl<'a> Compiler<'a> {
     fn report_error(token: &scanner::Token<'a>, message: &'static str) -> Error {
         eprint!("[line {}] Error", token.line);
         match &token.token_type {
-            scanner::TokenType::Error(message) => eprintln!(" : {message}"),
+            scanner::TokenType::Error(scan_message) => eprintln!(" : {scan_message}"),
             other => eprintln!(" at {other:?}: {message}"),
         }
         Error::CompileError(message)
@@ -1127,7 +1132,10 @@ mod tests {
 
     fn compile(source: &str) -> Chunk {
         let compiler = Compiler::new(source);
-        compiler.compile().unwrap().chunk
+        compiler
+            .compile()
+            .expect("Compiler error unexpected.")
+            .chunk
     }
 
     #[test]
