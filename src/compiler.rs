@@ -223,12 +223,17 @@ impl<'a> Compiler<'a> {
         self.block()?;
 
         self.end_function();
-        self.end_scope(0); // TODO.
+        let end_line = self.peek().map_or(0, |token| token.line);
+        self.end_scope(end_line);
         let function = mem::replace(&mut self.function, old_fn);
         self.function_type = old_fn_type;
+        let index = self
+            .function
+            .chunk
+            .write_constant(chunk::Value::Function(Rc::from(function)));
         self.function
             .chunk
-            .write_constant_instruction(chunk::Value::Function(Rc::from(function)), line);
+            .write_chunk(chunk::OpCode::Closure(index), line);
         Ok(())
     }
 
@@ -1825,7 +1830,7 @@ mod tests {
         check_chunk(
             &chunk,
             &[
-                OpCode::Constant(1),
+                OpCode::Closure(1),
                 OpCode::DefineGlobal(0),
                 OpCode::GetGlobal(2),
                 OpCode::Print,
@@ -1857,7 +1862,7 @@ mod tests {
         check_chunk(
             &chunk,
             &[
-                OpCode::Constant(1),
+                OpCode::Closure(1),
                 OpCode::DefineGlobal(0),
                 OpCode::GetGlobal(2),
                 OpCode::Constant(3),

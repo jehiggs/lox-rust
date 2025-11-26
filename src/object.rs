@@ -1,6 +1,7 @@
 use crate::{chunk, error::Error};
 
 use std::fmt::Display;
+use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
@@ -37,3 +38,22 @@ pub enum FunctionType {
 }
 
 pub type NativeFunction = fn(usize, &[chunk::Value]) -> Result<chunk::Value, Error>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Closure {
+    pub function: Rc<Function>,
+}
+
+impl Closure {
+    pub fn new(function: &Rc<Function>) -> Self {
+        Closure {
+            function: Rc::clone(function),
+        }
+    }
+}
+
+impl Display for Closure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.function.fmt(f)
+    }
+}

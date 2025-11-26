@@ -46,7 +46,8 @@ impl VM {
             };
             script.chunk.disassemble_chunk(name);
         }
-        let initial_frame = CallFrame::new(&Rc::from(script), 0);
+        let closure = Rc::from(object::Closure::new(&Rc::from(script)));
+        let initial_frame = CallFrame::new(&closure, 0);
         self.call_stack.push(initial_frame);
         self.run()
     }
@@ -66,17 +67,17 @@ impl VM {
             .pop()
             .ok_or(Error::RuntimeError("No frame on call stack."))?;
         loop {
-            let instruction = *frame.function.chunk.read_code(frame.ip);
+            let instruction = *frame.closure.function.chunk.read_code(frame.ip);
             #[cfg(debug_assertions)]
             self.debug_instruction(&frame, &instruction);
             frame.ip += 1;
             match instruction {
                 chunk::OpCode::Constant(index) => {
-                    let constant = frame.function.chunk.read_constant(index.into());
+                    let constant = frame.closure.function.chunk.read_constant(index.into());
                     self.push_constant(constant);
                 }
                 chunk::OpCode::ConstantLong(index) => {
-                    let constant = frame.function.chunk.read_constant(index);
+                    let constant = frame.closure.function.chunk.read_constant(index);
                     self.push_constant(constant);
                 }
                 chunk::OpCode::Return => {
@@ -89,7 +90,7 @@ impl VM {
                     })?;
                     let return_frame = self.call_stack.pop();
                     if let Some(fr) = return_frame {
-                        for _ in 0..frame.function.arity {
+                        for _ in 0..frame.closure.function.arity {
                             self.stack.pop();
                         }
                         self.stack.pop();
@@ -197,7 +198,8 @@ impl VM {
                     self.stack.pop();
                 }
                 chunk::OpCode::DefineGlobal(index) => {
-                    if let chunk::Value::String(string) = frame.function.chunk.read_constant(index)
+                    if let chunk::Value::String(string) =
+                        frame.closure.function.chunk.read_constant(index)
                     {
                         let value = self.stack.pop().ok_or_else(|| {
                             Self::runtime_error(
@@ -216,7 +218,8 @@ impl VM {
                     }
                 }
                 chunk::OpCode::GetGlobal(index) => {
-                    if let chunk::Value::String(string) = frame.function.chunk.read_constant(index)
+                    if let chunk::Value::String(string) =
+                        frame.closure.function.chunk.read_constant(index)
                     {
                         let value = self.globals.get(string).ok_or_else(|| {
                             Self::runtime_error(
@@ -235,7 +238,8 @@ impl VM {
                     }
                 }
                 chunk::OpCode::SetGlobal(index) => {
-                    if let chunk::Value::String(string) = frame.function.chunk.read_constant(index)
+                    if let chunk::Value::String(string) =
+                        frame.closure.function.chunk.read_constant(index)
                     {
                         let next = self.peek(0);
                         let value = match next {
@@ -306,9 +310,10 @@ impl VM {
                     frame.ip -= jump_size;
                 }
                 chunk::OpCode::Call(arg_count) => {
-                    let callable = self.peek(arg_count);
-                    match callable {
-                        Some(chunk::Value::Function(func)) => {
+                    let stack_len = self.stack.len();
+                    match self.peek(arg_count) {
+                        Some(chunk::Value::Closure(closure)) => {
+                            let func = &closure.function;
                             if func.arity != arg_count {
                                 return Err(Self::runtime_error(
                                     &frame,
@@ -316,14 +321,12 @@ impl VM {
                                     &self.call_stack,
                                 ));
                             }
-                            let new_frame =
-                                CallFrame::new(&Rc::clone(func), self.stack.len() - arg_count);
+                            let new_frame = CallFrame::new(closure, stack_len - arg_count);
                             let old_frame = mem::replace(&mut frame, new_frame);
                             self.call_stack.push(old_frame);
                         }
                         Some(chunk::Value::Native(func)) => {
-                            let result =
-                                func(arg_count, &self.stack[self.stack.len() - arg_count..])?;
+                            let result = func(arg_count, &self.stack[stack_len - arg_count..])?;
                             for _ in 0..arg_count {
                                 self.stack.pop();
                             }
@@ -338,6 +341,19 @@ impl VM {
                             ));
                         }
                     }
+                }
+                chunk::OpCode::Closure(index) => {
+                    let chunk::Value::Function(function) =
+                        frame.closure.function.chunk.read_constant(index)
+                    else {
+                        return Err(Self::runtime_error(
+                            &frame,
+                            "Constant for closure was not a function.",
+                            &self.call_stack,
+                        ));
+                    };
+                    let closure = chunk::Value::Closure(Rc::new(object::Closure::new(function)));
+                    self.stack.push(closure);
                 }
             }
         }
@@ -398,6 +414,7 @@ impl VM {
         }
         println!("]");
         frame
+            .closure
             .function
             .chunk
             .disassemble_instruction(frame.ip, instruction);
@@ -406,16 +423,16 @@ impl VM {
     fn runtime_error(frame: &CallFrame, message: &'static str, stack: &[CallFrame]) -> Error {
         eprintln!(
             "[Line {}] Error in script: {}",
-            frame.function.chunk.get_line(frame.ip),
+            frame.closure.function.chunk.get_line(frame.ip),
             message
         );
         for lower_frame in stack.iter().rev() {
-            let name = if lower_frame.function.name.is_empty() {
+            let name = if lower_frame.closure.function.name.is_empty() {
                 "script"
             } else {
-                &lower_frame.function.name
+                &lower_frame.closure.function.name
             };
-            let line = lower_frame.function.chunk.get_line(lower_frame.ip);
+            let line = lower_frame.closure.function.chunk.get_line(lower_frame.ip);
             eprintln!("[Line {line}] in {name}");
         }
 
@@ -442,15 +459,15 @@ impl VM {
 #[derive(Debug)]
 struct CallFrame {
     ip: usize,
-    function: Rc<object::Function>,
+    closure: Rc<object::Closure>,
     stack_idx: usize,
 }
 
 impl CallFrame {
-    fn new(function: &Rc<object::Function>, stack_idx: usize) -> Self {
+    fn new(closure: &Rc<object::Closure>, stack_idx: usize) -> Self {
         CallFrame {
             ip: 0,
-            function: Rc::clone(function),
+            closure: Rc::clone(closure),
             stack_idx,
         }
     }

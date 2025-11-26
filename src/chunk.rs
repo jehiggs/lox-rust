@@ -1,5 +1,5 @@
-use crate::object::Function;
 use crate::object::NativeFunction;
+use crate::object::{Closure, Function};
 use std::fmt;
 use std::rc::Rc;
 
@@ -11,13 +11,18 @@ pub enum Value {
     String(Rc<str>),
     Function(Rc<Function>),
     Native(NativeFunction),
+    Closure(Rc<Closure>),
 }
 
 impl Value {
     pub fn is_falsey(&self) -> bool {
         match *self {
             Value::Bool(value) => !value,
-            Value::Number(_) | Value::String(_) | Value::Function(_) | Value::Native(_) => false,
+            Value::Number(_)
+            | Value::String(_)
+            | Value::Function(_)
+            | Value::Native(_)
+            | Value::Closure(_) => false,
             Value::Nil => true,
         }
     }
@@ -32,6 +37,10 @@ impl fmt::Display for Value {
             Value::String(ref string) => write!(f, "{string}"),
             Value::Function(ref func) => write!(f, "{func}"),
             Value::Native(_) => write!(f, "<native function>"),
+            Value::Closure(ref closure) => {
+                let name = &closure.function.name;
+                write!(f, "{name}")
+            }
         }
     }
 }
@@ -46,6 +55,7 @@ impl PartialEq for Value {
             // As Lox only supports one native function, if both things are natives they are the same.
             // This works around comparing function pointers.
             (Self::Native(_), Self::Native(_)) => true,
+            (Self::Closure(l0), Self::Closure(r0)) => l0 == r0,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -55,6 +65,7 @@ impl PartialEq for Value {
 pub enum OpCode {
     Add,
     Call(usize),
+    Closure(usize),
     Constant(u8),
     ConstantLong(usize),
     DefineGlobal(usize),
@@ -215,6 +226,7 @@ impl Chunk {
             }
             OpCode::Loop(jump_size) => Self::print_jump("Loop", *jump_size, index, false),
             OpCode::Call(_) => println!("Call"),
+            OpCode::Closure(const_index) => self.print_constant("Closure", *const_index),
         }
     }
 
