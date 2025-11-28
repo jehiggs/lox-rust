@@ -9,8 +9,7 @@ use std::rc::Rc;
 
 const LOCAL_SIZE: usize = 255;
 
-pub struct Compiler<'a> {
-    scanner: iter::Peekable<scanner::Scanner<'a>>,
+pub struct FuncScope<'a> {
     function: object::Function,
     function_type: object::FunctionType,
     locals: [Option<Local<'a>>; LOCAL_SIZE],
@@ -18,31 +17,139 @@ pub struct Compiler<'a> {
     scope_depth: usize,
 }
 
-impl<'a> Compiler<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Compiler {
-            scanner: scanner::Scanner::new(source).peekable(),
-            function: object::Function::new(""),
-            function_type: object::FunctionType::Script,
+impl<'a> FuncScope<'a> {
+    fn new(name: &str, func_type: object::FunctionType) -> Self {
+        FuncScope {
+            function: object::Function::new(name),
+            function_type: func_type,
             locals: [const { None }; LOCAL_SIZE],
             local_count: 0,
             scope_depth: 0,
         }
     }
 
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self, line: usize) {
+        self.scope_depth -= 1;
+        for item in self.locals[0..self.local_count].iter_mut().rev() {
+            match item {
+                Some(Local::Initialized(depth, _)) if *depth > self.scope_depth => {
+                    *item = None;
+                    self.local_count -= 1;
+                    self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
+                }
+                Some(_) | None => break,
+            }
+        }
+    }
+
+    fn declare_variable(&mut self, token: scanner::Token<'a>) -> Result<(), Error> {
+        if self.scope_depth == 0 {
+            return Ok(());
+        }
+        if self.local_count >= LOCAL_SIZE {
+            return Err(Compiler::report_error(
+                &token,
+                "Could not declare variable due to insufficient size.",
+            ));
+        }
+        if let scanner::TokenType::Identifier(_) = token.token_type {
+            for item in self.locals[0..self.local_count].iter().rev() {
+                match item {
+                    Some(Local::Initialized(depth, _)) if *depth < self.scope_depth => break,
+                    Some(local) => {
+                        if *local.name() == token {
+                            return Err(Compiler::report_error(
+                                &token,
+                                "Attempted to redeclare a variable in the same scope.",
+                            ));
+                        }
+                    }
+                    None => break,
+                }
+            }
+            let local = Local::new(token);
+            self.locals[self.local_count] = Some(local);
+            self.local_count += 1;
+            Ok(())
+        } else {
+            Err(Compiler::report_error(
+                &token,
+                "Received non-identifier for declaring a variable.",
+            ))
+        }
+    }
+
+    fn resolve_local(&mut self, token: &scanner::Token<'a>) -> Result<Option<usize>, Error> {
+        let token_name = Compiler::extract_name(token)?;
+        for (index, item) in self.locals[0..self.local_count].iter().enumerate().rev() {
+            if let Some(local) = item {
+                let local_name = Compiler::extract_name(local.name())?;
+                if token_name == local_name {
+                    match local {
+                        Local::Initialized(_, _) => return Ok(Some(index)),
+                        Local::Uninitialized(_) => {
+                            return Err(Compiler::error(
+                                "Can't read variable in its own initializer.",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn mark_initialized(&mut self) {
+        if self.scope_depth > 0
+            && let Some(local) = self.locals[self.local_count - 1].take()
+        {
+            self.locals[self.local_count - 1] = Some(local.initialize(self.scope_depth));
+        }
+    }
+}
+
+pub struct Compiler<'a> {
+    scanner: iter::Peekable<scanner::Scanner<'a>>,
+    stack: Vec<FuncScope<'a>>,
+}
+
+impl<'a> Compiler<'a> {
+    pub fn new(source: &'a str) -> Self {
+        let scope = FuncScope::new("", object::FunctionType::Script);
+        let stack = Vec::from([scope]);
+        Compiler {
+            scanner: scanner::Scanner::new(source).peekable(),
+            stack,
+        }
+    }
+
     pub fn compile(mut self) -> Result<object::Function, Error> {
         if self.peek().is_none() {
-            return Ok(self.function);
+            let function = self
+                .stack
+                .pop()
+                .ok_or_else(|| Self::error("Did not get a default empty function."))
+                .map(|scope| scope.function)?;
+            return Ok(function);
         }
         let mut result = Ok(());
         while self.peek().is_some() {
             result = result.and(self.declaration());
         }
-        self.end_function();
+        self.end_function()?;
         if self.scanner.next().is_some() {
             return Err(Self::error("Compiler failed to parse all code in source."));
         }
-        result.map(|()| self.function)
+        let function = self
+            .stack
+            .pop()
+            .ok_or_else(|| Self::error("Should have a top-level function compiled"))
+            .map(|scope| scope.function)?;
+        result.map(|()| function)
     }
 
     // Returns the current token to process!
@@ -114,6 +221,16 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn current_chunk(&mut self) -> Result<&mut chunk::Chunk, Error> {
+        self.current_frame().map(|scope| &mut scope.function.chunk)
+    }
+
+    fn current_frame(&mut self) -> Result<&mut FuncScope<'a>, Error> {
+        self.stack
+            .last_mut()
+            .ok_or_else(|| Self::error("Missing function to compile into."))
+    }
+
     fn synchronize(&mut self) {
         while let Some(token) = self.peek() {
             match token.token_type {
@@ -158,14 +275,14 @@ impl<'a> Compiler<'a> {
             _ = self.advance();
             self.expression()?;
         } else {
-            self.function.chunk.write_chunk(chunk::OpCode::Nil, line);
+            self.current_chunk()?.write_chunk(chunk::OpCode::Nil, line);
         }
 
         self.consume(
             mem::discriminant(&scanner::TokenType::Semicolon),
             "Expect ';' after a variable declaration.",
         )?;
-        self.define_variable(global, line);
+        self.define_variable(global, line)?;
         Ok(())
     }
 
@@ -187,28 +304,28 @@ impl<'a> Compiler<'a> {
             return Err(Self::error("Missing token when parsing a function."));
         };
         let global = self.parse_variable("Failed to parse a function name.")?;
-        self.mark_initialized();
+        self.mark_initialized()?;
         self.function(object::FunctionType::Function, name)?;
-        self.define_variable(global, line);
+        self.define_variable(global, line)?;
         Ok(())
     }
 
     fn function(&mut self, function_type: object::FunctionType, name: &str) -> Result<(), Error> {
-        let old_fn = mem::replace(&mut self.function, object::Function::new(name));
-        let old_fn_type = mem::replace(&mut self.function_type, function_type);
-        self.begin_scope();
+        let new_scope = FuncScope::new(name, function_type);
+        self.stack.push(new_scope);
+        self.begin_scope()?;
         let line = self.consume(
             mem::discriminant(&scanner::TokenType::LeftParen),
             "Expect '(' after function name.",
         )?;
         while !self.check(mem::discriminant(&scanner::TokenType::RightParen)) {
-            self.function.arity += 1;
-            if self.function.arity > 255 {
+            self.current_frame()?.function.arity += 1;
+            if self.current_frame()?.function.arity > 255 {
                 return Err(Self::error("Over 255 function parameters provided."));
             }
             let param_line = self.peek().map_or(line, |token| token.line);
             let constant = self.parse_variable("Expected a parameter name.")?;
-            self.define_variable(constant, param_line);
+            self.define_variable(constant, param_line)?;
             if !self.check(mem::discriminant(&scanner::TokenType::RightParen)) {
                 self.consume(
                     mem::discriminant(&scanner::TokenType::Comma),
@@ -222,35 +339,34 @@ impl<'a> Compiler<'a> {
         )?;
         self.block()?;
 
-        self.end_function();
+        self.end_function()?;
         let end_line = self.peek().map_or(0, |token| token.line);
-        self.end_scope(end_line);
-        let function = mem::replace(&mut self.function, old_fn);
-        self.function_type = old_fn_type;
+        self.end_scope(end_line)?;
+        let completed_scope = self.stack.pop().expect("Item must be on stack.");
         let index = self
-            .function
-            .chunk
-            .write_constant(chunk::Value::Function(Rc::from(function)));
-        self.function
-            .chunk
+            .current_chunk()?
+            .write_constant(chunk::Value::Function(Rc::from(completed_scope.function)));
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Closure(index), line);
         Ok(())
     }
 
-    fn end_function(&mut self) {
+    fn end_function(&mut self) -> Result<(), Error> {
         let line = self.peek().map_or(0, |token| token.line);
-        self.function.chunk.write_chunk(chunk::OpCode::Nil, line);
-        self.function.chunk.write_chunk(chunk::OpCode::Return, line);
+        self.current_chunk()?.write_chunk(chunk::OpCode::Nil, line);
+        self.current_chunk()?
+            .write_chunk(chunk::OpCode::Return, line);
+        Ok(())
     }
 
     fn statement(&mut self) -> Result<(), Error> {
         match self.peek().map(|token| &token.token_type) {
             Some(scanner::TokenType::Print) => self.print_statement(),
             Some(scanner::TokenType::LeftBrace) => {
-                self.begin_scope();
+                self.begin_scope()?;
                 let result = self.block();
                 let line = self.peek().map_or(0, |token| token.line);
-                self.end_scope(line);
+                self.end_scope(line)?;
                 result
             }
             Some(scanner::TokenType::If) => self.if_statement(),
@@ -261,22 +377,14 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn begin_scope(&mut self) {
-        self.scope_depth += 1;
+    fn begin_scope(&mut self) -> Result<(), Error> {
+        self.current_frame()?.begin_scope();
+        Ok(())
     }
 
-    fn end_scope(&mut self, line: usize) {
-        self.scope_depth -= 1;
-        for item in self.locals[0..self.local_count].iter_mut().rev() {
-            match item {
-                Some(Local::Initialized(depth, _)) if *depth > self.scope_depth => {
-                    *item = None;
-                    self.local_count -= 1;
-                    self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
-                }
-                Some(_) | None => break,
-            }
-        }
+    fn end_scope(&mut self, line: usize) -> Result<(), Error> {
+        self.current_frame()?.end_scope(line);
+        Ok(())
     }
 
     fn print_statement(&mut self) -> Result<(), Error> {
@@ -289,8 +397,7 @@ impl<'a> Compiler<'a> {
             mem::discriminant(&scanner::TokenType::Semicolon),
             "Expect ; after value.",
         )?;
-        self.function
-            .chunk
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Print, token.line);
         Ok(())
     }
@@ -305,7 +412,7 @@ impl<'a> Compiler<'a> {
             mem::discriminant(&scanner::TokenType::Semicolon),
             "Expect ; after expression statement.",
         )?;
-        self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
+        self.current_chunk()?.write_chunk(chunk::OpCode::Pop, line);
         Ok(())
     }
 
@@ -324,14 +431,14 @@ impl<'a> Compiler<'a> {
             "Expect ')' after if condition.",
         )?;
 
-        let then_jump_offset = self.emit_jump(chunk::OpCode::JumpIfFalse(0), if_line);
-        self.function.chunk.write_chunk(chunk::OpCode::Pop, if_line);
+        let then_jump_offset = self.emit_jump(chunk::OpCode::JumpIfFalse(0), if_line)?;
+        self.current_chunk()?
+            .write_chunk(chunk::OpCode::Pop, if_line);
         self.statement()?;
         let next_line = self.peek().map_or(0, |token| token.line);
-        let else_jump_offset = self.emit_jump(chunk::OpCode::Jump(0), next_line);
+        let else_jump_offset = self.emit_jump(chunk::OpCode::Jump(0), next_line)?;
         self.patch_jump(then_jump_offset)?;
-        self.function
-            .chunk
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Pop, next_line);
         if self.match_token(mem::discriminant(&scanner::TokenType::Else)) {
             self.statement()?;
@@ -340,7 +447,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn while_statement(&mut self) -> Result<(), Error> {
-        let loop_start = self.function.chunk.code_len();
+        let loop_start = self.current_chunk()?.code_len();
         let while_line = self.consume(
             mem::discriminant(&scanner::TokenType::While),
             "Require a while token to parse a while statement.",
@@ -355,22 +462,20 @@ impl<'a> Compiler<'a> {
             "Expect ')' after while condition.",
         )?;
 
-        let loop_exit = self.emit_jump(chunk::OpCode::JumpIfFalse(0), while_line);
-        self.function
-            .chunk
+        let loop_exit = self.emit_jump(chunk::OpCode::JumpIfFalse(0), while_line)?;
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Pop, while_line);
         self.statement()?;
         let next_line = self.peek().map_or(0, |token| token.line);
-        self.emit_loop(loop_start, next_line);
+        self.emit_loop(loop_start, next_line)?;
         self.patch_jump(loop_exit)?;
-        self.function
-            .chunk
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Pop, while_line);
         Ok(())
     }
 
     fn for_statement(&mut self) -> Result<(), Error> {
-        self.begin_scope();
+        self.begin_scope()?;
         let for_line = self.consume(
             mem::discriminant(&scanner::TokenType::For),
             "Require a for token to parse a for statement.",
@@ -390,7 +495,7 @@ impl<'a> Compiler<'a> {
                 return Err(Self::error("Required a token in a for loop."));
             }
         }
-        let mut loop_start = self.function.chunk.code_len();
+        let mut loop_start = self.current_chunk()?.code_len();
 
         // Guard
         let condition_jump = match self.peek().map(|token| &token.token_type) {
@@ -401,9 +506,8 @@ impl<'a> Compiler<'a> {
                     mem::discriminant(&scanner::TokenType::Semicolon),
                     "Require a ';' after loop condition.",
                 )?;
-                let exit_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), for_line);
-                self.function
-                    .chunk
+                let exit_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), for_line)?;
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Pop, for_line);
                 Some(exit_jump)
             }
@@ -418,13 +522,12 @@ impl<'a> Compiler<'a> {
         match self.peek().map(|token| &token.token_type) {
             Some(scanner::TokenType::RightParen) => {}
             Some(_) => {
-                let body_jump = self.emit_jump(chunk::OpCode::Jump(0), for_line);
-                let increment_start = self.function.chunk.code_len();
+                let body_jump = self.emit_jump(chunk::OpCode::Jump(0), for_line)?;
+                let increment_start = self.current_chunk()?.code_len();
                 self.expression()?;
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Pop, for_line);
-                self.emit_loop(loop_start, for_line);
+                self.emit_loop(loop_start, for_line)?;
                 loop_start = increment_start;
                 self.patch_jump(body_jump)?;
             }
@@ -442,17 +545,17 @@ impl<'a> Compiler<'a> {
         // Body
         self.statement()?;
         let line = self.peek().map_or(0, |token| token.line);
-        self.emit_loop(loop_start, line);
+        self.emit_loop(loop_start, line)?;
         if let Some(jump_size) = condition_jump {
             self.patch_jump(jump_size)?;
-            self.function.chunk.write_chunk(chunk::OpCode::Pop, line);
+            self.current_chunk()?.write_chunk(chunk::OpCode::Pop, line);
         }
-        self.end_scope(line);
+        self.end_scope(line)?;
         Ok(())
     }
 
     fn return_statement(&mut self) -> Result<(), Error> {
-        if self.function_type == object::FunctionType::Script {
+        if self.current_frame()?.function_type == object::FunctionType::Script {
             return Err(Self::error("Cannot return from a top level script."));
         }
         self.consume(
@@ -462,7 +565,7 @@ impl<'a> Compiler<'a> {
         match self.peek().map(|token| &token.token_type) {
             Some(scanner::TokenType::Semicolon) => {
                 self.advance();
-                self.end_function();
+                self.end_function()?;
             }
             Some(_) => {
                 self.expression()?;
@@ -470,7 +573,8 @@ impl<'a> Compiler<'a> {
                     mem::discriminant(&scanner::TokenType::Semicolon),
                     "Expect a ';' at the end of a return statement.",
                 )?;
-                self.function.chunk.write_chunk(chunk::OpCode::Return, line);
+                self.current_chunk()?
+                    .write_chunk(chunk::OpCode::Return, line);
             }
             None => {
                 return Err(Self::error("Expect a token when parsing a return"));
@@ -479,14 +583,14 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn emit_jump(&mut self, instruction: chunk::OpCode, line: usize) -> usize {
-        self.function.chunk.write_chunk(instruction, line);
-        self.function.chunk.code_len() - 1
+    fn emit_jump(&mut self, instruction: chunk::OpCode, line: usize) -> Result<usize, Error> {
+        self.current_chunk()?.write_chunk(instruction, line);
+        Ok(self.current_chunk()?.code_len() - 1)
     }
 
     fn patch_jump(&mut self, offset: usize) -> Result<(), Error> {
-        let code_to_jump = self.function.chunk.code_len() - offset - 1;
-        let code = self.function.chunk.patch_code(offset);
+        let code_to_jump = self.current_chunk()?.code_len() - offset - 1;
+        let code = self.current_chunk()?.patch_code(offset);
         match code {
             chunk::OpCode::JumpIfFalse(_) => {
                 *code = chunk::OpCode::JumpIfFalse(code_to_jump);
@@ -500,11 +604,11 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn emit_loop(&mut self, offset: usize, line: usize) {
-        let code_to_jump = self.function.chunk.code_len() - offset + 1;
-        self.function
-            .chunk
+    fn emit_loop(&mut self, offset: usize, line: usize) -> Result<(), Error> {
+        let code_to_jump = self.current_chunk()?.code_len() - offset + 1;
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Loop(code_to_jump), line);
+        Ok(())
     }
 
     fn expression(&mut self) -> Result<(), Error> {
@@ -535,8 +639,7 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| Self::error("Missing required number token."))?;
         match token.token_type {
             scanner::TokenType::Number(value) => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_constant_instruction(chunk::Value::Number(value), token.line);
                 Ok(())
             }
@@ -568,14 +671,12 @@ impl<'a> Compiler<'a> {
         self.parse_precedence(Precedence::Unary)?;
         match token.token_type {
             scanner::TokenType::Minus => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Negate, token.line);
                 Ok(())
             }
             scanner::TokenType::Bang => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
@@ -593,71 +694,58 @@ impl<'a> Compiler<'a> {
 
         match token.token_type {
             scanner::TokenType::Minus => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Subtract, token.line);
                 Ok(())
             }
             scanner::TokenType::Plus => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Add, token.line);
                 Ok(())
             }
             scanner::TokenType::Star => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Multiply, token.line);
                 Ok(())
             }
             scanner::TokenType::Slash => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Divide, token.line);
                 Ok(())
             }
             scanner::TokenType::BangEqual => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Equal, token.line);
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
             scanner::TokenType::EqualEqual => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Equal, token.line);
                 Ok(())
             }
             scanner::TokenType::Greater => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Greater, token.line);
                 Ok(())
             }
             scanner::TokenType::GreaterEqual => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Less, token.line);
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
             scanner::TokenType::Less => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Less, token.line);
                 Ok(())
             }
             scanner::TokenType::LessEqual => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Greater, token.line);
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Not, token.line);
                 Ok(())
             }
@@ -673,8 +761,7 @@ impl<'a> Compiler<'a> {
             .advance()
             .ok_or_else(|| Self::error("Missing required left parenthesis in call."))?;
         let arg_count = self.argument_list()?;
-        self.function
-            .chunk
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Call(arg_count), token.line);
         Ok(())
     }
@@ -685,20 +772,17 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| Self::error("Missing required literal token."))?;
         match token.token_type {
             scanner::TokenType::False => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::False, token.line);
                 Ok(())
             }
             scanner::TokenType::True => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::True, token.line);
                 Ok(())
             }
             scanner::TokenType::Nil => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_chunk(chunk::OpCode::Nil, token.line);
                 Ok(())
             }
@@ -715,8 +799,7 @@ impl<'a> Compiler<'a> {
             .ok_or_else(|| Self::error("Missing required string token."))?;
         match token.token_type {
             scanner::TokenType::String(string) => {
-                self.function
-                    .chunk
+                self.current_chunk()?
                     .write_constant_instruction(chunk::Value::String(Rc::from(string)), token.line);
                 Ok(())
             }
@@ -752,8 +835,7 @@ impl<'a> Compiler<'a> {
             )
         } else {
             let index = self
-                .function
-                .chunk
+                .current_chunk()?
                 .write_constant(chunk::Value::String(Rc::from(ident)));
             (
                 chunk::OpCode::GetGlobal(index),
@@ -762,29 +844,15 @@ impl<'a> Compiler<'a> {
         };
         if can_assign && self.match_token(mem::discriminant(&scanner::TokenType::Equal)) {
             self.expression()?;
-            self.function.chunk.write_chunk(set_op, token.line);
+            self.current_chunk()?.write_chunk(set_op, token.line);
         } else {
-            self.function.chunk.write_chunk(get_op, token.line);
+            self.current_chunk()?.write_chunk(get_op, token.line);
         }
         Ok(())
     }
 
     fn resolve_local(&mut self, token: &scanner::Token<'a>) -> Result<Option<usize>, Error> {
-        let token_name = Self::extract_name(token)?;
-        for (index, item) in self.locals[0..self.local_count].iter().enumerate().rev() {
-            if let Some(local) = item {
-                let local_name = Self::extract_name(local.name())?;
-                if token_name == local_name {
-                    match local {
-                        Local::Initialized(_, _) => return Ok(Some(index)),
-                        Local::Uninitialized(_) => {
-                            return Err(Self::error("Can't read variable in its own initializer."));
-                        }
-                    }
-                }
-            }
-        }
-        Ok(None)
+        self.current_frame()?.resolve_local(token)
     }
 
     fn extract_name(token: &scanner::Token<'a>) -> Result<&'a str, Error> {
@@ -824,13 +892,12 @@ impl<'a> Compiler<'a> {
         if let Some(current) = self.advance() {
             match current.token_type {
                 scanner::TokenType::Identifier(ident) => {
-                    if self.scope_depth > 0 {
+                    if self.current_frame()?.scope_depth > 0 {
                         self.declare_variable(current)?;
                         Ok(0)
                     } else {
                         let index = self
-                            .function
-                            .chunk
+                            .current_chunk()?
                             .write_constant(chunk::Value::String(Rc::from(ident)));
                         Ok(index)
                     }
@@ -843,50 +910,17 @@ impl<'a> Compiler<'a> {
     }
 
     fn declare_variable(&mut self, token: scanner::Token<'a>) -> Result<(), Error> {
-        if self.scope_depth == 0 {
-            return Ok(());
-        }
-        if self.local_count >= LOCAL_SIZE {
-            return Err(Self::report_error(
-                &token,
-                "Could not declare variable due to insufficient size.",
-            ));
-        }
-        if let scanner::TokenType::Identifier(_) = token.token_type {
-            for item in self.locals[0..self.local_count].iter().rev() {
-                match item {
-                    Some(Local::Initialized(depth, _)) if *depth < self.scope_depth => break,
-                    Some(local) => {
-                        if *local.name() == token {
-                            return Err(Self::report_error(
-                                &token,
-                                "Attempted to redeclare a variable in the same scope.",
-                            ));
-                        }
-                    }
-                    None => break,
-                }
-            }
-            let local = Local::new(token);
-            self.locals[self.local_count] = Some(local);
-            self.local_count += 1;
-            Ok(())
-        } else {
-            Err(Self::report_error(
-                &token,
-                "Received non-identifier for declaring a variable.",
-            ))
-        }
+        self.current_frame()?.declare_variable(token)
     }
 
-    fn define_variable(&mut self, index: usize, line: usize) {
-        if self.scope_depth > 0 {
-            self.mark_initialized();
-            return;
+    fn define_variable(&mut self, index: usize, line: usize) -> Result<(), Error> {
+        if self.current_frame()?.scope_depth > 0 {
+            self.mark_initialized()?;
+            return Ok(());
         }
-        self.function
-            .chunk
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::DefineGlobal(index), line);
+        Ok(())
     }
 
     fn argument_list(&mut self) -> Result<usize, Error> {
@@ -913,12 +947,9 @@ impl<'a> Compiler<'a> {
         Ok(arg_count)
     }
 
-    fn mark_initialized(&mut self) {
-        if self.scope_depth > 0
-            && let Some(local) = self.locals[self.local_count - 1].take()
-        {
-            self.locals[self.local_count - 1] = Some(local.initialize(self.scope_depth));
-        }
+    fn mark_initialized(&mut self) -> Result<(), Error> {
+        self.current_frame()?.mark_initialized();
+        Ok(())
     }
 
     fn parse_and(&mut self, _: bool) -> Result<(), Error> {
@@ -926,9 +957,8 @@ impl<'a> Compiler<'a> {
             mem::discriminant(&scanner::TokenType::And),
             "Expected an 'and' token.",
         )?;
-        let jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line);
-        self.function
-            .chunk
+        let jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line)?;
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Pop, next_line);
         self.parse_precedence(Precedence::And)?;
         self.patch_jump(jump)
@@ -939,11 +969,10 @@ impl<'a> Compiler<'a> {
             mem::discriminant(&scanner::TokenType::Or),
             "Expected an 'or' token.",
         )?;
-        let first_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line);
-        let second_jump = self.emit_jump(chunk::OpCode::Jump(0), next_line);
+        let first_jump = self.emit_jump(chunk::OpCode::JumpIfFalse(0), next_line)?;
+        let second_jump = self.emit_jump(chunk::OpCode::Jump(0), next_line)?;
         self.patch_jump(first_jump)?;
-        self.function
-            .chunk
+        self.current_chunk()?
             .write_chunk(chunk::OpCode::Pop, next_line);
 
         self.parse_precedence(Precedence::Or)?;
