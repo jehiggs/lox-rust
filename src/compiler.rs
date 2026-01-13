@@ -1,6 +1,7 @@
 use crate::chunk;
 use crate::error::Error;
 use crate::object;
+use crate::object::UpValue;
 use crate::scanner;
 
 use std::iter;
@@ -109,6 +110,17 @@ impl<'a> FuncScope<'a> {
         {
             self.locals[self.local_count - 1] = Some(local.initialize(self.scope_depth));
         }
+    }
+
+    fn add_upvalue(&mut self, index: usize, is_local: bool) -> usize {
+        let upvalue = UpValue { index, is_local };
+        for (i, current_upvalue) in self.function.upvalues.iter().enumerate() {
+            if *current_upvalue == upvalue {
+                return i;
+            }
+        }
+        self.function.upvalues.push(upvalue);
+        self.function.upvalues.len() - 1
     }
 }
 
@@ -833,6 +845,11 @@ impl<'a> Compiler<'a> {
                 chunk::OpCode::GetLocal(index),
                 chunk::OpCode::SetLocal(index),
             )
+        } else if let Some(index) = self.resolve_upvalue(token)? {
+            (
+                chunk::OpCode::GetUpvalue(index),
+                chunk::OpCode::SetUpvalue(index),
+            )
         } else {
             let index = self
                 .current_chunk()?
@@ -853,6 +870,36 @@ impl<'a> Compiler<'a> {
 
     fn resolve_local(&mut self, token: &scanner::Token<'a>) -> Result<Option<usize>, Error> {
         self.current_frame()?.resolve_local(token)
+    }
+
+    fn resolve_upvalue(&mut self, token: &scanner::Token<'a>) -> Result<Option<usize>, Error> {
+        let stack_size = self.stack.len();
+        if stack_size <= 1 {
+            return Ok(None);
+        }
+
+        // Find the function scope with the closed over variable (if one exists).
+        let mut index = None;
+        let mut function_def = 0;
+        for (idx, item) in self.stack[0..stack_size - 1].iter_mut().enumerate().rev() {
+            function_def = idx;
+            index = item.resolve_local(token)?;
+            if index.is_some() {
+                break;
+            }
+        }
+
+        let Some(mut captured_idx) = index else {
+            return Ok(None);
+        };
+
+        // Capture the closed over variable in every deeper scope.
+        let mut first = true;
+        for item in &mut self.stack[function_def..stack_size] {
+            captured_idx = item.add_upvalue(captured_idx, first);
+            first = false;
+        }
+        Ok(Some(captured_idx))
     }
 
     fn extract_name(token: &scanner::Token<'a>) -> Result<&'a str, Error> {

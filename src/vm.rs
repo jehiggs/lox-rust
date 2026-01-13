@@ -8,6 +8,7 @@ use crate::chunk;
 use crate::compiler;
 use crate::error::Error;
 use crate::object;
+use crate::object::RuntimeUpvalue;
 
 const STACK_SIZE: usize = 256;
 const TABLE_SIZE: usize = 10;
@@ -352,8 +353,56 @@ impl VM {
                             &self.call_stack,
                         ));
                     };
-                    let closure = chunk::Value::Closure(Rc::new(object::Closure::new(function)));
+                    let mut new_closure = object::Closure::new(function);
+                    let runtime_upvalues = function
+                        .upvalues
+                        .iter()
+                        .map(|upvalue| {
+                            if upvalue.is_local {
+                                RuntimeUpvalue::Open(upvalue.index)
+                            } else {
+                                frame.closure.upvalues[upvalue.index].clone()
+                            }
+                        })
+                        .collect();
+                    new_closure.upvalues = runtime_upvalues;
+                    let closure = chunk::Value::Closure(Rc::new(new_closure));
                     self.stack.push(closure);
+                }
+                chunk::OpCode::GetUpvalue(index) => {
+                    let upvalue = &frame.closure.upvalues[index];
+                    let value = match upvalue {
+                        RuntimeUpvalue::Open(stack_idx) => {
+                            self.stack.get(*stack_idx).ok_or_else(|| {
+                                Self::runtime_error(
+                                    &frame,
+                                    "No value found in stack for upvalue.",
+                                    &self.call_stack,
+                                )
+                            })?
+                        }
+                        RuntimeUpvalue::Closed(value) => value,
+                    };
+                    self.stack.push(value.clone());
+                }
+                chunk::OpCode::SetUpvalue(index) => {
+                    let value = self.peek(0);
+                    let Some(new_value) = value else {
+                        return Err(Self::runtime_error(
+                            &frame,
+                            "No value found in stack for upvalue.",
+                            &self.call_stack,
+                        ));
+                    };
+                    let upvalue = &frame.closure.upvalues[index];
+                    match upvalue {
+                        RuntimeUpvalue::Open(stack_idx) => {
+                            self.stack[*stack_idx] = new_value.clone();
+                        }
+                        RuntimeUpvalue::Closed(_) => {
+                            todo!()
+                        }
+                    }
                 }
             }
         }
